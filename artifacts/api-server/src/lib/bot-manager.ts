@@ -229,24 +229,15 @@ class BotManager {
     } else if (atype === "watching") {
       activities.push({ name: this.state.activitySongTitle ?? "something", type: 3 });
     } else if (atype === "streaming") {
-      const streamImageUrl = this.state.activityImageUrl?.trim();
+      // Discord renders activity type 1 as the violet Streaming presence.
+      // Keep Twitch visible without changing the profile's normal status treatment.
+      const twitchId = this.state.activityTwitchId?.trim();
+      const streamTitle = this.state.activitySongTitle?.trim() || "Twitch";
       activities.push({
-        name: this.state.activitySongTitle ?? "stream",
-        type: 1,
-        url: `https://twitch.tv/${this.state.activityTwitchId ?? "discord"}`,
-        details: "Live on Twitch",
-        state: this.state.activityTwitchId
-          ? `twitch.tv/${this.state.activityTwitchId}`
-          : "Streaming now",
-        ...(streamImageUrl
-          ? {
-              assets: {
-                large_image: streamImageUrl,
-                large_text: this.state.activitySongTitle ?? "Twitch stream",
-                small_text: "Twitch",
-              },
-            }
-          : {}),
+        name: twitchId ? `Twitch: ${twitchId}` : streamTitle,
+        type: 3, // WATCHING: avoids Discord's violet Streaming treatment
+        state: twitchId ? `twitch.tv/${twitchId}` : "Twitch",
+        details: streamTitle,
       });
     } else if (atype === "competing") {
       activities.push({ name: this.state.activitySongTitle ?? "a tournament", type: 5 });
