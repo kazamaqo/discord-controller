@@ -24,7 +24,7 @@ export interface VoiceState {
   currentTrackTitle: string | null;
 }
 
-class MusicManager {
+export class MusicManager {
   private connection: VoiceConnection | null = null;
   private player: AudioPlayer | null = null;
   private state: VoiceState = {
@@ -173,4 +173,14 @@ class MusicManager {
   }
 }
 
-export const musicManager = new MusicManager();
+const musicManagers = new Map<string, MusicManager>();
+
+export function getMusicManager(accountId = "primary"): MusicManager {
+  const existing = musicManagers.get(accountId);
+  if (existing) return existing;
+  const manager = new MusicManager();
+  musicManagers.set(accountId, manager);
+  return manager;
+}
+
+export const musicManager = getMusicManager("primary");
