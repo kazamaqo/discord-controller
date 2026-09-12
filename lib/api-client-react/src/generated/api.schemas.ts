@@ -26,12 +26,17 @@ export const StatusInputStatus = {
   idle: 'idle',
   dnd: 'dnd',
   invisible: 'invisible',
+  streaming: 'streaming',
 } as const;
 
 export interface StatusInput {
   status: StatusInputStatus;
   /** @nullable */
   customText?: string | null;
+  /** @nullable */
+  streamTitle?: string | null;
+  /** @nullable */
+  twitchId?: string | null;
 }
 
 export type ActivityInputType = typeof ActivityInputType[keyof typeof ActivityInputType];
@@ -42,7 +47,6 @@ export const ActivityInputType = {
   spotify: 'spotify',
   playing: 'playing',
   watching: 'watching',
-  streaming: 'streaming',
   competing: 'competing',
 } as const;
 
@@ -129,6 +133,10 @@ export interface BotState {
   status: BotStateStatus;
   /** @nullable */
   customText?: string | null;
+  /** @nullable */
+  statusStreamTitle?: string | null;
+  /** @nullable */
+  statusTwitchId?: string | null;
   activityType: BotStateActivityType;
   /** @nullable */
   activitySongTitle?: string | null;

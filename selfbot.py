@@ -15,6 +15,7 @@ import os
 import time
 import uuid
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from flask import Flask, request, jsonify, render_template_string
 from flask_cors import CORS
 
@@ -36,6 +37,8 @@ bot_state = {
     "userId": None,
     "status": "online",
     "customText": None,
+    "statusStreamTitle": None,
+    "statusTwitchId": None,
     "activityType": "none",
     "activitySongTitle": None,
     "activityArtist": None,
@@ -90,16 +93,25 @@ async def apply_presence(client):
         "dnd": discord.Status.dnd,
         "invisible": discord.Status.invisible,
     }
-    status = status_map.get(bot_state["status"], discord.Status.online)
+    is_streaming_status = bot_state["status"] == "streaming"
+    status = discord.Status.online if is_streaming_status else status_map.get(
+        bot_state["status"], discord.Status.online
+    )
 
     atype = bot_state["activityType"]
     activity = None
 
-    if atype == "spotify":
+    if is_streaming_status:
+        twitch_id = (bot_state.get("statusTwitchId") or "").strip()
+        stream_title = (bot_state.get("statusStreamTitle") or "Twitch").strip()
+        activity = discord.Streaming(
+            name=stream_title,
+            url=f"https://twitch.tv/{twitch_id or 'discord'}",
+        )
+    elif atype == "spotify":
         song = bot_state["activitySongTitle"] or "Unknown Song"
         artist = bot_state["activityArtist"] or "Unknown Artist"
         album = bot_state["activityAlbum"] or ""
-        # Fake Spotify activity — Discord shows special Spotify card
         activity = discord.Activity(
             type=discord.ActivityType.listening,
             name="Spotify",
@@ -119,16 +131,6 @@ async def apply_presence(client):
             type=discord.ActivityType.watching,
             name=bot_state["activitySongTitle"] or "something",
         )
-    elif atype == "streaming":
-        # ActivityType.streaming always gets Discord's violet Streaming treatment.
-        # Use a watching activity so Twitch remains visible without changing the profile status color.
-        twitch_id = (bot_state.get("activityTwitchId") or "").strip()
-        stream_title = (bot_state.get("activitySongTitle") or "Twitch").strip()
-        activity = discord.Activity(
-            type=discord.ActivityType.watching,
-            name=f"Twitch: {twitch_id}" if twitch_id else stream_title,
-            state=f"twitch.tv/{twitch_id}" if twitch_id else "Twitch",
-        )
     elif atype == "competing":
         activity = discord.Activity(
             type=discord.ActivityType.competing,
@@ -139,10 +141,9 @@ async def apply_presence(client):
 
     try:
         await client.change_presence(status=status, activity=activity)
-        print(f"[BOT] Presence set: {status} / {atype}")
+        print(f"[BOT] Presence set: {status} / {bot_state['status']} / {atype}")
     except Exception as e:
         print(f"[BOT] Presence error: {e}")
-
 
 def run_client(token):
     global client_instance, loop
@@ -219,8 +220,16 @@ def set_status():
     data = request.json or {}
     bot_state["status"] = data.get("status", "online")
     bot_state["customText"] = data.get("customText")
+    if bot_state["status"] == "streaming":
+        bot_state["statusStreamTitle"] = (data.get("streamTitle") or "Twitch").strip()
+        bot_state["statusTwitchId"] = (data.get("twitchId") or "").strip() or None
     if client_instance and loop:
-        asyncio.run_coroutine_threadsafe(apply_presence(client_instance), loop)
+        try:
+            asyncio.run_coroutine_threadsafe(apply_presence(client_instance), loop).result(timeout=10)
+        except FutureTimeoutError:
+            return jsonify({"error": "Presence update timed out"}), 504
+        except Exception as exc:
+            return jsonify({"error": "Presence update failed", "message": str(exc)}), 400
     return jsonify(bot_state)
 
 
@@ -236,7 +245,12 @@ def set_activity():
     bot_state["activityImageUrl"] = data.get("imageUrl")
     bot_state["activityTwitchId"] = data.get("twitchId")
     if client_instance and loop:
-        asyncio.run_coroutine_threadsafe(apply_presence(client_instance), loop)
+        try:
+            asyncio.run_coroutine_threadsafe(apply_presence(client_instance), loop).result(timeout=10)
+        except FutureTimeoutError:
+            return jsonify({"error": "Presence update timed out"}), 504
+        except Exception as exc:
+            return jsonify({"error": "Presence update failed", "message": str(exc)}), 400
     return jsonify(bot_state)
 
 
@@ -402,6 +416,7 @@ HTML = r"""<!DOCTYPE html>
   .status-btn.idle { color: var(--yellow); }
   .status-btn.dnd { color: var(--red); }
   .status-btn.invisible { color: var(--muted); }
+  .status-btn.streaming { color: #9147ff; }
   .badge { display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; }
   .badge-online { background: #2d4a33; color: var(--green); }
   .badge-offline { background: #3a2020; color: var(--red); }
@@ -493,6 +508,18 @@ HTML = r"""<!DOCTYPE html>
           <button class="status-btn idle" onclick="setStatus('idle')">Idle</button>
           <button class="status-btn dnd" onclick="setStatus('dnd')">Do Not Disturb</button>
           <button class="status-btn invisible" onclick="setStatus('invisible')">Invisible</button>
+          <button class="status-btn streaming" onclick="setStatus('streaming')">Streaming</button>
+        </div>
+        <div id="streaming-status-fields" style="display:none; margin-top:14px">
+          <div class="mb">
+            <label>STREAM TITLE</label>
+            <input type="text" id="status-stream-title" placeholder="What are you streaming?" />
+          </div>
+          <div class="mb">
+            <label>TWITCH CHANNEL</label>
+            <input type="text" id="status-twitch-id" placeholder="your Twitch channel name" />
+          </div>
+          <button class="btn btn-primary" onclick="setStatus('streaming')">Update Twitch Status</button>
         </div>
         <div style="margin-top:14px">
           <label>CUSTOM STATUS TEXT</label>
@@ -516,7 +543,6 @@ HTML = r"""<!DOCTYPE html>
             <option value="spotify">Listening to Spotify</option>
             <option value="playing">Playing a Game</option>
             <option value="watching">Watching</option>
-            <option value="streaming">Streaming</option>
             <option value="competing">Competing</option>
           </select>
         </div>
@@ -540,11 +566,6 @@ HTML = r"""<!DOCTYPE html>
               <input type="text" id="activity-image" placeholder="https://... (leave blank for Spotify icon)" oninput="updateSpotifyPreview()" />
             </div>
           </div>
-          <div class="mb" id="streaming-only" style="display:none">
-            <label>TWITCH ID / CHANNEL NAME</label>
-            <input type="text" id="activity-twitch-id" placeholder="your Twitch channel name" />
-          </div>
-
           <div id="spotify-preview" class="spotify-preview">
             <img id="preview-img" src="" alt="Album Art" onerror="this.src=''" />
             <div>
@@ -673,37 +694,55 @@ function renderState(s) {
     avatarWrap.outerHTML = `<img id="avatar-wrap" class="avatar" src="${s.avatarUrl}" />`;
   }
   if (s.customText) document.getElementById('custom-text').value = s.customText;
+  if (s.statusStreamTitle) document.getElementById('status-stream-title').value = s.statusStreamTitle;
+  if (s.statusTwitchId) document.getElementById('status-twitch-id').value = s.statusTwitchId;
   currentStatus = s.status;
+  updateStreamingFields();
+}
+
+function updateStreamingFields() {
+  document.getElementById('streaming-status-fields').style.display =
+    currentStatus === 'streaming' ? 'block' : 'none';
 }
 
 async function setStatus(status) {
   currentStatus = status;
+  updateStreamingFields();
   const customText = document.getElementById('custom-text').value;
-  const res = await api('/api/bot/status', 'POST', { status, customText });
+  const body = { status, customText };
+  if (status === 'streaming') {
+    body.streamTitle = document.getElementById('status-stream-title').value.trim() || null;
+    body.twitchId = document.getElementById('status-twitch-id').value.trim() || null;
+  }
+  const res = await api('/api/bot/status', 'POST', body);
   if (res.error) return toast(res.error, 'error');
+  renderState(res);
   toast('Status set to ' + status);
 }
 
 async function setCustomText() {
   const customText = document.getElementById('custom-text').value;
-  const res = await api('/api/bot/status', 'POST', { status: currentStatus, customText });
+  const body = { status: currentStatus, customText };
+  if (currentStatus === 'streaming') {
+    body.streamTitle = document.getElementById('status-stream-title').value.trim() || null;
+    body.twitchId = document.getElementById('status-twitch-id').value.trim() || null;
+  }
+  const res = await api('/api/bot/status', 'POST', body);
   if (res.error) return toast(res.error, 'error');
+  renderState(res);
   toast('Custom status saved');
 }
 
 function onActivityTypeChange() {
   const type = document.getElementById('activity-type').value;
   const spotifyOnly = document.getElementById('spotify-only');
-  const streamingOnly = document.getElementById('streaming-only');
   const labelSong = document.getElementById('label-song');
   const preview = document.getElementById('spotify-preview');
   spotifyOnly.style.display = type === 'spotify' ? 'block' : 'none';
-  streamingOnly.style.display = type === 'streaming' ? 'block' : 'none';
   preview.style.display = type === 'spotify' ? 'flex' : 'none';
   if (type === 'spotify') { labelSong.textContent = 'SONG TITLE'; preview.classList.add('show'); }
   else if (type === 'playing') labelSong.textContent = 'GAME NAME';
   else if (type === 'watching') labelSong.textContent = 'WATCHING NAME';
-  else if (type === 'streaming') labelSong.textContent = 'STREAM TITLE';
   else if (type === 'competing') labelSong.textContent = 'TOURNAMENT NAME';
   else labelSong.textContent = 'NAME';
 }
@@ -726,7 +765,6 @@ async function setActivity() {
     artist: document.getElementById('activity-artist').value || null,
     album: document.getElementById('activity-album').value || null,
     imageUrl: document.getElementById('activity-image').value || null,
-    twitchId: document.getElementById('activity-twitch-id').value.trim() || null,
   };
   const res = await api('/api/bot/activity', 'POST', body);
   if (res.error) return toast(res.error, 'error');

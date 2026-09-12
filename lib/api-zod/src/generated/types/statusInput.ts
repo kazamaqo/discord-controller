@@ -11,4 +11,8 @@ export interface StatusInput {
   status: StatusInputStatus;
   /** @nullable */
   customText?: string | null;
+  /** @nullable */
+  streamTitle?: string | null;
+  /** @nullable */
+  twitchId?: string | null;
 }

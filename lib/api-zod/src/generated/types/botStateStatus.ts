@@ -14,4 +14,5 @@ export const BotStateStatus = {
   idle: 'idle',
   dnd: 'dnd',
   invisible: 'invisible',
+  streaming: 'streaming',
 } as const;

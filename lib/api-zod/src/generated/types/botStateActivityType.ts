@@ -14,6 +14,5 @@ export const BotStateActivityType = {
   spotify: 'spotify',
   playing: 'playing',
   watching: 'watching',
-  streaming: 'streaming',
   competing: 'competing',
 } as const;

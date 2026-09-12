@@ -386,9 +386,15 @@ components:
       properties:
         status:
           type: string
-          enum: [online, idle, dnd, invisible]
+          enum: [online, idle, dnd, invisible, streaming]
         customText:
           type: ["string", "null"]
+        streamTitle:
+          type: ["string", "null"]
+          description: Twitch stream title used when status is streaming
+        twitchId:
+          type: ["string", "null"]
+          description: Twitch channel ID or username used when status is streaming
 
     ActivityInput:
       type: object
@@ -396,7 +402,7 @@ components:
       properties:
         type:
           type: string
-          enum: [none, spotify, playing, watching, streaming, competing]
+          enum: [none, spotify, playing, watching, competing]
         songTitle:
           type: ["string", "null"]
           description: Song/track title (for Spotify) or activity name
@@ -461,12 +467,16 @@ components:
           type: ["string", "null"]
         status:
           type: string
-          enum: [online, idle, dnd, invisible]
+          enum: [online, idle, dnd, invisible, streaming]
         customText:
+          type: ["string", "null"]
+        statusStreamTitle:
+          type: ["string", "null"]
+        statusTwitchId:
           type: ["string", "null"]
         activityType:
           type: string
-          enum: [none, spotify, playing, watching, streaming, competing]
+          enum: [none, spotify, playing, watching, competing]
         activitySongTitle:
           type: ["string", "null"]
         activityArtist:

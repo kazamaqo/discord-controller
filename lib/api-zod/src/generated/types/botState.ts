@@ -21,6 +21,10 @@ export interface BotState {
   status: BotStateStatus;
   /** @nullable */
   customText?: string | null;
+  /** @nullable */
+  statusStreamTitle?: string | null;
+  /** @nullable */
+  statusTwitchId?: string | null;
   activityType: BotStateActivityType;
   /** @nullable */
   activitySongTitle?: string | null;

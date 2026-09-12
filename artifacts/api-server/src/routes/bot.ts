@@ -46,8 +46,10 @@ router.post("/bot/status", async (req, res): Promise<void> => {
     return;
   }
   const updated = await botManager.setStatus(
-    parsed.data.status as "online" | "idle" | "dnd" | "invisible",
-    parsed.data.customText
+    parsed.data.status as "online" | "idle" | "dnd" | "invisible" | "streaming",
+    parsed.data.customText,
+    parsed.data.streamTitle,
+    parsed.data.twitchId
   );
   res.json(updated);
 });
@@ -63,8 +65,8 @@ router.post("/bot/activity", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  const updated = botManager.setActivity(
-    parsed.data.type as "none" | "spotify" | "playing" | "watching" | "streaming" | "competing",
+  const updated = await botManager.setActivity(
+    parsed.data.type as "none" | "spotify" | "playing" | "watching" | "competing",
     parsed.data.songTitle,
     parsed.data.artist,
     parsed.data.album,
