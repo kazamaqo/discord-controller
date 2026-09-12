@@ -1,12 +1,15 @@
-import { Router, type IRouter } from "express";
-import { botManager } from "../lib/bot-manager";
+import { Router, type IRouter, type Request } from "express";
+import { getBotManager, type AccountId } from "../lib/bot-manager";
 import { ChangeUsernameBody, ChangeNicknameBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-router.get("/profile/guilds", async (_req, res): Promise<void> => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = (botManager as any).client;
+function accountIdFromRequest(req: Request): AccountId {
+  return req.get("x-discord-account") === "secondary" ? "secondary" : "primary";
+}
+
+router.get("/profile/guilds", async (req, res): Promise<void> => {
+  const client = getBotManager(accountIdFromRequest(req)).getClient();
   if (!client) {
     res.json([]);
     return;
@@ -26,21 +29,19 @@ router.post("/profile/username", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const state = botManager.getState();
-  if (!state.connected) {
+  const manager = getBotManager(accountIdFromRequest(req));
+  if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = (botManager as any).client;
+  const client = manager.getClient();
   if (!client?.user) {
     res.status(400).json({ error: "Bot client unavailable" });
     return;
   }
   try {
     await client.user.edit({ username: parsed.data.username, password: parsed.data.password });
-    const updated = botManager.getState();
-    // Refresh username from client
+    const updated = manager.getState();
     updated.username = client.user.username;
     updated.discriminator = client.user.discriminator;
     res.json(updated);
@@ -57,13 +58,12 @@ router.post("/profile/nickname", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const state = botManager.getState();
-  if (!state.connected) {
+  const manager = getBotManager(accountIdFromRequest(req));
+  if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = (botManager as any).client;
+  const client = manager.getClient();
   if (!client) {
     res.status(400).json({ error: "Bot client unavailable" });
     return;
