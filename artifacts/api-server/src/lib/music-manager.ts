@@ -26,6 +26,8 @@ export interface VoiceState {
 }
 
 export class MusicManager {
+  constructor(private readonly accountId: AccountId) {}
+
   private connection: VoiceConnection | null = null;
   private player: AudioPlayer | null = null;
   private state: VoiceState = {
@@ -54,6 +56,10 @@ export class MusicManager {
     this.connection = joinVoiceChannel({
       channelId,
       guildId,
+      // Keep each account in its own @discordjs/voice connection group.
+      // Without this, two accounts joining the same guild reuse the same
+      // process-level connection and the second account never joins.
+      group: this.accountId,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       adapterCreator: guild.voiceAdapterCreator as any,
       selfDeaf: false,
@@ -179,7 +185,7 @@ const musicManagers = new Map<AccountId, MusicManager>();
 export function getMusicManager(accountId: AccountId = "primary"): MusicManager {
   const existing = musicManagers.get(accountId);
   if (existing) return existing;
-  const manager = new MusicManager();
+  const manager = new MusicManager(accountId);
   musicManagers.set(accountId, manager);
   return manager;
 }
