@@ -88,7 +88,7 @@ export default function Login() {
       }
       window.localStorage.setItem("discord-active-account", accountId);
       setTokens((current) => ({ ...current, [accountId]: "" }));
-      setLocation("/dashboard");
+      setLocation(`/dashboard/${accountId}`);
     } catch (error) {
       toast({ title: error instanceof Error ? error.message : "Invalid token", variant: "destructive" });
       await loadAccounts().catch(() => undefined);
@@ -137,7 +137,7 @@ export default function Login() {
                 </div>
                 <Input type="password" value={tokens[accountId]} onChange={(event) => setTokens((current) => ({ ...current, [accountId]: event.target.value }))} placeholder="Paste user token..." className="bg-black border-[#222] text-white font-mono h-11" />
                 <Button onClick={() => void connectAccount(accountId)} className="w-full h-11 bg-red-600 hover:bg-red-700 text-white font-bold uppercase tracking-widest" disabled={pendingAccount !== null || !tokens[accountId].trim()}>{pendingAccount === accountId ? "Connecting..." : connected ? "Reconnect account" : "Connect account"}</Button>
-                {connected && <Button variant="outline" onClick={() => { window.localStorage.setItem("discord-active-account", accountId); setLocation("/dashboard"); }} className="w-full border-[#333] text-zinc-300">Open dashboard</Button>}
+                {connected && <Button variant="outline" onClick={() => { window.localStorage.setItem("discord-active-account", accountId); setLocation(`/dashboard/${accountId}`); }} className="w-full border-[#333] text-zinc-300">Open dashboard</Button>}
               </div>
             );
           })}
