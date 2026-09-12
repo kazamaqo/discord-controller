@@ -1,5 +1,6 @@
-import { Router, type IRouter } from "express";
-import { botManager } from "../lib/bot-manager";
+import { Router, type IRouter, type Request } from "express";
+import { getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
+import { getMusicManager } from "../lib/music-manager";
 import {
   ConnectBotBody,
   SetStatusBody,
@@ -9,29 +10,44 @@ import {
 
 const router: IRouter = Router();
 
+function accountIdFromRequest(req: Request, bodyAccountId?: unknown): AccountId {
+  if (bodyAccountId === "secondary" || req.get("x-discord-account") === "secondary") {
+    return "secondary";
+  }
+  return "primary";
+}
+
+router.get("/bot/accounts", async (_req, res): Promise<void> => {
+  res.json(getAccountSummaries());
+});
+
 router.post("/bot/connect", async (req, res): Promise<void> => {
   const parsed = ConnectBotBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  const accountId = accountIdFromRequest(req, req.body?.accountId);
+  const manager = getBotManager(accountId);
   try {
-    const state = await botManager.connect(parsed.data.token);
+    const state = await manager.connect(parsed.data.token);
     res.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to connect";
-    req.log.error({ err }, "Bot connection failed");
+    req.log.error({ err, accountId }, "Bot connection failed");
     res.status(400).json({ error: "Connection failed", message });
   }
 });
 
-router.post("/bot/disconnect", async (_req, res): Promise<void> => {
-  const state = await botManager.disconnect();
+router.post("/bot/disconnect", async (req, res): Promise<void> => {
+  const accountId = accountIdFromRequest(req);
+  const state = await getBotManager(accountId).disconnect();
+  getMusicManager(accountId).stop();
   res.json(state);
 });
 
-router.get("/bot/state", async (_req, res): Promise<void> => {
-  res.json(botManager.getState());
+router.get("/bot/state", async (req, res): Promise<void> => {
+  res.json(getBotManager(accountIdFromRequest(req)).getState());
 });
 
 router.post("/bot/status", async (req, res): Promise<void> => {
@@ -40,12 +56,12 @@ router.post("/bot/status", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const state = botManager.getState();
-  if (!state.connected) {
+  const manager = getBotManager(accountIdFromRequest(req));
+  if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  const updated = await botManager.setStatus(
+  const updated = await manager.setStatus(
     parsed.data.status as "online" | "idle" | "dnd" | "invisible" | "streaming",
     parsed.data.customText,
     parsed.data.streamTitle,
@@ -60,12 +76,12 @@ router.post("/bot/activity", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const state = botManager.getState();
-  if (!state.connected) {
+  const manager = getBotManager(accountIdFromRequest(req));
+  if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  const updated = await botManager.setActivity(
+  const updated = await manager.setActivity(
     parsed.data.type as "none" | "spotify" | "playing" | "watching" | "competing",
     parsed.data.songTitle,
     parsed.data.artist,
@@ -82,18 +98,17 @@ router.post("/bot/mass-dm", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const state = botManager.getState();
-  if (!state.connected) {
+  const manager = getBotManager(accountIdFromRequest(req));
+  if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  const whitelist = botManager.getWhitelist();
-  if (!whitelist.length) {
+  if (!manager.getWhitelist().length) {
     res.status(400).json({ error: "Whitelist is empty" });
     return;
   }
   try {
-    const result = await botManager.massDm(parsed.data.message);
+    const result = await manager.massDm(parsed.data.message);
     res.json(result);
   } catch (err: unknown) {
     req.log.error({ err }, "Mass DM failed");
