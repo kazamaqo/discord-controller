@@ -30,7 +30,7 @@ export interface BotState {
   activityTwitchId: string | null;
 }
 
-class BotManager {
+export class BotManager {
   private client: Client | null = null;
   private presenceUpdate: Promise<void> = Promise.resolve();
   private state: BotState = {
@@ -274,4 +274,25 @@ class BotManager {
 
 }
 
-export const botManager = new BotManager();
+export const ACCOUNT_IDS = ["primary", "secondary"] as const;
+export type AccountId = (typeof ACCOUNT_IDS)[number];
+
+const accountManagers = new Map<AccountId, BotManager>();
+
+export function getBotManager(accountId: AccountId = "primary"): BotManager {
+  const existing = accountManagers.get(accountId);
+  if (existing) return existing;
+  const manager = new BotManager();
+  accountManagers.set(accountId, manager);
+  return manager;
+}
+
+export function getAccountSummaries(): { id: AccountId; label: string; state: BotState }[] {
+  return ACCOUNT_IDS.map((id) => ({
+    id,
+    label: id === "primary" ? "Account 1" : "Account 2",
+    state: getBotManager(id).getState(),
+  }));
+}
+
+export const botManager = getBotManager("primary");
