@@ -379,6 +379,10 @@ components:
       properties:
         token:
           type: string
+        accountId:
+          type: string
+          enum: [primary, secondary]
+          description: Account slot to connect; defaults to primary
 
     StatusInput:
       type: object
