@@ -1,12 +1,16 @@
-import { Router, type IRouter } from "express";
-import { botManager } from "../lib/bot-manager";
-import { musicManager } from "../lib/music-manager";
+import { Router, type IRouter, type Request } from "express";
+import { getBotManager, type AccountId } from "../lib/bot-manager";
+import { getMusicManager } from "../lib/music-manager";
 import { JoinVoiceBody, PlayMusicBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
-router.get("/voice/state", async (_req, res): Promise<void> => {
-  res.json(musicManager.getState());
+function accountIdFromRequest(req: Request): AccountId {
+  return req.get("x-discord-account") === "secondary" ? "secondary" : "primary";
+}
+
+router.get("/voice/state", async (req, res): Promise<void> => {
+  res.json(getMusicManager(accountIdFromRequest(req)).getState());
 });
 
 router.post("/voice/join", async (req, res): Promise<void> => {
@@ -15,23 +19,23 @@ router.post("/voice/join", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const state = botManager.getState();
-  if (!state.connected) {
+  const accountId = accountIdFromRequest(req);
+  const manager = getBotManager(accountId);
+  if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const client = (botManager as any).client;
+  const client = manager.getClient();
   if (!client) {
     res.status(400).json({ error: "Bot client unavailable" });
     return;
   }
   try {
-    const voiceState = await musicManager.join(client, parsed.data.guildId, parsed.data.channelId);
+    const voiceState = await getMusicManager(accountId).join(client, parsed.data.guildId, parsed.data.channelId);
     res.json(voiceState);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to join channel";
-    req.log.error({ err }, "Failed to join voice channel");
+    req.log.error({ err, accountId }, "Failed to join voice channel");
     res.status(400).json({ error: "Join failed", message });
   }
 });
@@ -43,7 +47,7 @@ router.post("/voice/play", async (req, res): Promise<void> => {
     return;
   }
   try {
-    const voiceState = await musicManager.play(parsed.data.query);
+    const voiceState = await getMusicManager(accountIdFromRequest(req)).play(parsed.data.query);
     res.json(voiceState);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Playback failed";
@@ -52,14 +56,12 @@ router.post("/voice/play", async (req, res): Promise<void> => {
   }
 });
 
-router.post("/voice/pause", async (_req, res): Promise<void> => {
-  const voiceState = musicManager.pause();
-  res.json(voiceState);
+router.post("/voice/pause", async (req, res): Promise<void> => {
+  res.json(getMusicManager(accountIdFromRequest(req)).pause());
 });
 
-router.post("/voice/stop", async (_req, res): Promise<void> => {
-  const voiceState = musicManager.stop();
-  res.json(voiceState);
+router.post("/voice/stop", async (req, res): Promise<void> => {
+  res.json(getMusicManager(accountIdFromRequest(req)).stop());
 });
 
 export default router;
