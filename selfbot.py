@@ -120,9 +120,14 @@ async def apply_presence(client):
             name=bot_state["activitySongTitle"] or "something",
         )
     elif atype == "streaming":
-        activity = discord.Streaming(
-            name=bot_state["activitySongTitle"] or "stream",
-            url=f"https://twitch.tv/{bot_state['activityTwitchId'] or 'discord'}",
+        # ActivityType.streaming always gets Discord's violet Streaming treatment.
+        # Use a watching activity so Twitch remains visible without changing the profile status color.
+        twitch_id = (bot_state.get("activityTwitchId") or "").strip()
+        stream_title = (bot_state.get("activitySongTitle") or "Twitch").strip()
+        activity = discord.Activity(
+            type=discord.ActivityType.watching,
+            name=f"Twitch: {twitch_id}" if twitch_id else stream_title,
+            state=f"twitch.tv/{twitch_id}" if twitch_id else "Twitch",
         )
     elif atype == "competing":
         activity = discord.Activity(
