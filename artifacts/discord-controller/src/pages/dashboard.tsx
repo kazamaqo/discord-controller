@@ -75,23 +75,49 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [activeAccountId, setActiveAccountId] = useState<"primary" | "secondary">(() => {
+    if (typeof window === "undefined") return "primary";
+    return window.localStorage.getItem("discord-active-account") === "secondary" ? "secondary" : "primary";
+  });
+  const [accountSummaries, setAccountSummaries] = useState<Array<{
+    id: "primary" | "secondary";
+    label: string;
+    state: { connected: boolean; username?: string | null };
+  }>>([]);
+
+  const loadAccountSummaries = async () => {
+    const response = await fetch("/api/bot/accounts", { credentials: "same-origin" });
+    if (response.ok) setAccountSummaries(await response.json());
+  };
+
+  useEffect(() => {
+    void loadAccountSummaries().catch(() => undefined);
+    const interval = window.setInterval(() => void loadAccountSummaries().catch(() => undefined), 5000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const switchAccount = (accountId: "primary" | "secondary") => {
+    window.localStorage.setItem("discord-active-account", accountId);
+    setActiveAccountId(accountId);
+    queryClient.invalidateQueries();
+  };
 
   const { data: botState, isLoading: stateLoading } = useGetBotState({
     query: {
       refetchInterval: 5000,
-      queryKey: getGetBotStateQueryKey(),
+      queryKey: [...getGetBotStateQueryKey(), activeAccountId],
     }
   });
 
   const { data: whitelist = [], isLoading: whitelistLoading } = useGetWhitelist({
-    query: { queryKey: getGetWhitelistQueryKey() },
+    query: { queryKey: [...getGetWhitelistQueryKey(), activeAccountId] },
   });
   
-  const { data: guilds = [] } = useGetGuilds();
+  const { data: guilds = [] } = useGetGuilds({ query: { queryKey: [...getGetGuildsQueryKey(), activeAccountId] } });
   const { data: voiceState } = useGetVoiceState({
     query: {
       refetchInterval: 3000,
-      queryKey: getGetVoiceStateQueryKey(),
+      queryKey: [...getGetVoiceStateQueryKey(), activeAccountId],
     }
   });
 
@@ -396,7 +422,26 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background p-4 md:p-8 font-mono">
       <div className="max-w-5xl mx-auto space-y-6">
         
-        {/* Header / Identity */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Active account</p>
+            <p className="text-sm text-foreground">Switching accounts keeps presence, whitelist, profile, and voice controls separate.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select value={activeAccountId} onValueChange={(value) => switchAccount(value as "primary" | "secondary")}>
+              <SelectTrigger className="w-40 h-10"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {["primary", "secondary"].map((accountId) => {
+                  const account = accountSummaries.find((item) => item.id === accountId);
+                  return <SelectItem key={accountId} value={accountId}>{account?.label || (accountId === "primary" ? "Account 1" : "Account 2")}{account?.state.connected ? " · " + (account.state.username || "connected") : " · offline"}</SelectItem>;
+                })}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={() => setLocation("/login")}>Manage accounts</Button>
+          </div>
+        </div>
+
+        {/* Header / Identity */>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card border border-border p-6 rounded-xl shadow-lg">
           <div className="flex items-center gap-6">
             <div className="relative">
