@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "r7kyNG8-EcPqDtpokhKm9"
+uri = "file://selfbot.zip"
+type = "unspecified"
+title = "selfbot.py — Termux Edition (single file)"

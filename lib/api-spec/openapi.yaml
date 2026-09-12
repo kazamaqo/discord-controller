@@ -1,0 +1,569 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Discord selfbot controller API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+  - name: bot
+  - name: whitelist
+  - name: voice
+  - name: profile
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /bot/connect:
+    post:
+      operationId: connectBot
+      tags: [bot]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotConnectInput"
+      responses:
+        "200":
+          description: Connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotState"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bot/disconnect:
+    post:
+      operationId: disconnectBot
+      tags: [bot]
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotState"
+
+  /bot/state:
+    get:
+      operationId: getBotState
+      tags: [bot]
+      responses:
+        "200":
+          description: Bot state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotState"
+
+  /bot/status:
+    post:
+      operationId: setStatus
+      tags: [bot]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusInput"
+      responses:
+        "200":
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotState"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bot/activity:
+    post:
+      operationId: setActivity
+      tags: [bot]
+      summary: Set rich presence activity (Spotify, playing, watching, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityInput"
+      responses:
+        "200":
+          description: Activity updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotState"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /bot/mass-dm:
+    post:
+      operationId: massDm
+      tags: [bot]
+      summary: Send a DM to all whitelisted users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MassDmInput"
+      responses:
+        "200":
+          description: Results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MassDmResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /whitelist:
+    get:
+      operationId: getWhitelist
+      tags: [whitelist]
+      responses:
+        "200":
+          description: Whitelist
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WhitelistEntry"
+    post:
+      operationId: addToWhitelist
+      tags: [whitelist]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WhitelistInput"
+      responses:
+        "201":
+          description: Added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhitelistEntry"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /whitelist/{id}:
+    delete:
+      operationId: removeFromWhitelist
+      tags: [whitelist]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /voice/join:
+    post:
+      operationId: joinVoice
+      tags: [voice]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VoiceJoinInput"
+      responses:
+        "200":
+          description: Joined
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceState"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /voice/play:
+    post:
+      operationId: playMusic
+      tags: [voice]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlayMusicInput"
+      responses:
+        "200":
+          description: Playing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceState"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /voice/pause:
+    post:
+      operationId: pauseMusic
+      tags: [voice]
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceState"
+
+  /voice/stop:
+    post:
+      operationId: stopMusic
+      tags: [voice]
+      responses:
+        "200":
+          description: Stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceState"
+
+  /voice/state:
+    get:
+      operationId: getVoiceState
+      tags: [voice]
+      responses:
+        "200":
+          description: Voice state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VoiceState"
+
+  /profile/username:
+    post:
+      operationId: changeUsername
+      tags: [profile]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeUsernameInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotState"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /profile/nickname:
+    post:
+      operationId: changeNickname
+      tags: [profile]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangeNicknameInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /profile/guilds:
+    get:
+      operationId: getGuilds
+      tags: [profile]
+      responses:
+        "200":
+          description: Guild list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GuildInfo"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+
+    BotConnectInput:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    StatusInput:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [online, idle, dnd, invisible]
+        customText:
+          type: ["string", "null"]
+
+    ActivityInput:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [none, spotify, playing, watching, streaming, competing]
+        songTitle:
+          type: ["string", "null"]
+          description: Song/track title (for Spotify) or activity name
+        artist:
+          type: ["string", "null"]
+          description: Artist name (Spotify only)
+        album:
+          type: ["string", "null"]
+          description: Album name (Spotify only)
+        imageUrl:
+          type: ["string", "null"]
+          description: Album art URL or large image URL
+        twitchId:
+          type: ["string", "null"]
+          description: Twitch channel ID or username used for streaming activity URL
+
+    MassDmInput:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    MassDmResult:
+      type: object
+      required: [sent, failed, total]
+      properties:
+        sent:
+          type: number
+        failed:
+          type: number
+        total:
+          type: number
+        details:
+          type: array
+          items:
+            type: object
+            required: [userId, label, success]
+            properties:
+              userId:
+                type: string
+              label:
+                type: string
+              success:
+                type: boolean
+              error:
+                type: ["string", "null"]
+
+    BotState:
+      type: object
+      required: [connected, status, activityType]
+      properties:
+        connected:
+          type: boolean
+        username:
+          type: ["string", "null"]
+        discriminator:
+          type: ["string", "null"]
+        avatarUrl:
+          type: ["string", "null"]
+        userId:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [online, idle, dnd, invisible]
+        customText:
+          type: ["string", "null"]
+        activityType:
+          type: string
+          enum: [none, spotify, playing, watching, streaming, competing]
+        activitySongTitle:
+          type: ["string", "null"]
+        activityArtist:
+          type: ["string", "null"]
+        activityAlbum:
+          type: ["string", "null"]
+        activityImageUrl:
+          type: ["string", "null"]
+        activityTwitchId:
+          type: ["string", "null"]
+
+    WhitelistInput:
+      type: object
+      required: [userId, label]
+      properties:
+        userId:
+          type: string
+        label:
+          type: string
+
+    WhitelistEntry:
+      type: object
+      required: [id, userId, label, addedAt]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        label:
+          type: string
+        addedAt:
+          type: string
+
+    VoiceJoinInput:
+      type: object
+      required: [channelId, guildId]
+      properties:
+        channelId:
+          type: string
+        guildId:
+          type: string
+
+    PlayMusicInput:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+
+    VoiceState:
+      type: object
+      required: [inVoice, paused]
+      properties:
+        inVoice:
+          type: boolean
+        channelId:
+          type: ["string", "null"]
+        channelName:
+          type: ["string", "null"]
+        guildId:
+          type: ["string", "null"]
+        guildName:
+          type: ["string", "null"]
+        paused:
+          type: boolean
+        currentTrack:
+          type: ["string", "null"]
+        currentTrackTitle:
+          type: ["string", "null"]
+
+    ChangeUsernameInput:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    ChangeNicknameInput:
+      type: object
+      required: [guildId, nickname]
+      properties:
+        guildId:
+          type: string
+        nickname:
+          type: string
+
+    GuildInfo:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        iconUrl:
+          type: ["string", "null"]
+        memberCount:
+          type: ["number", "null"]

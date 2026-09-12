@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Discord Controller"
+version = "1.0.0"
+id = "artifacts/discord-controller"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20320
+
+[services.development]
+run = "pnpm --filter @workspace/discord-controller run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/discord-controller", "run", "build" ]
+publicDir = "artifacts/discord-controller/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20320"
+BASE_PATH = "/"
