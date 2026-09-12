@@ -349,6 +349,14 @@ export async function customFetch<T = unknown>(
     headers.set("accept", DEFAULT_JSON_ACCEPT);
   }
 
+  // Keep every generated API call scoped to the account selected in the dashboard.
+  if (typeof window !== "undefined") {
+    const accountId = window.localStorage.getItem("discord-active-account");
+    if (accountId && !headers.has("x-discord-account")) {
+      headers.set("x-discord-account", accountId);
+    }
+  }
+
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
   if (_authTokenGetter && !headers.has("authorization")) {
