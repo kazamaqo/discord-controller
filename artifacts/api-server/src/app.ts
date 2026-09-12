@@ -1,8 +1,14 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import {
+  dashboardAuthRouter,
+  requireDashboardAuth,
+} from "./lib/dashboard-auth";
 
 const app: Express = express();
 
@@ -29,6 +35,30 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.use("/api", dashboardAuthRouter);
+app.use("/api", requireDashboardAuth);
 app.use("/api", router);
+
+const frontendDist = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../discord-controller/dist/public",
+);
+
+app.use(express.static(frontendDist));
+app.use((request, response, next) => {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    next();
+    return;
+  }
+
+  if (request.path.startsWith("/api/")) {
+    next();
+    return;
+  }
+
+  response.sendFile(path.join(frontendDist, "index.html"), (error) => {
+    if (error) next(error);
+  });
+});
 
 export default app;
