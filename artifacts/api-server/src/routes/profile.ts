@@ -40,7 +40,7 @@ router.post("/profile/username", async (req, res): Promise<void> => {
     return;
   }
   try {
-    await client.user.edit({ username: parsed.data.username, password: parsed.data.password });
+    await client.user.setUsername(parsed.data.username, parsed.data.password);
     const updated = manager.getState();
     updated.username = client.user.username;
     updated.discriminator = client.user.discriminator;
@@ -74,8 +74,13 @@ router.post("/profile/nickname", async (req, res): Promise<void> => {
       res.status(400).json({ error: "Guild not found" });
       return;
     }
-    await guild.members.me.setNickname(parsed.data.nickname);
-    res.json({ error: "Nickname updated successfully" });
+    const member = guild.members.me;
+    if (!member) {
+      res.status(400).json({ error: "Bot member not found in guild" });
+      return;
+    }
+    await member.setNickname(parsed.data.nickname);
+    res.json({ message: "Nickname updated successfully" });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to change nickname";
     req.log.error({ err }, "Nickname change failed");
