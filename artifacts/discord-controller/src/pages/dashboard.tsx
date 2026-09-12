@@ -74,12 +74,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5";
 const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
 
+function accountIdFromPath(path: string): AccountId | null {
+  const match = path.match(/^\/dashboard\/(primary|secondary|account3|account4|account5)\/?$/);
+  return match ? (match[1] as AccountId) : null;
+}
+
 export default function Dashboard() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const routeAccountId = accountIdFromPath(location);
   const [activeAccountId, setActiveAccountId] = useState<AccountId>(() => {
     if (typeof window === "undefined") return "primary";
+    if (routeAccountId) return routeAccountId;
     const stored = window.localStorage.getItem("discord-active-account");
     return ACCOUNT_IDS.includes(stored as AccountId) ? (stored as AccountId) : "primary";
   });
@@ -88,10 +95,15 @@ export default function Dashboard() {
     label: string;
     state: { connected: boolean; username?: string | null };
   }>>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
 
   const loadAccountSummaries = async () => {
-    const response = await fetch("/api/bot/accounts", { credentials: "same-origin" });
-    if (response.ok) setAccountSummaries(await response.json());
+    try {
+      const response = await fetch("/api/bot/accounts", { credentials: "same-origin" });
+      if (response.ok) setAccountSummaries(await response.json());
+    } finally {
+      setAccountsLoaded(true);
+    }
   };
 
   useEffect(() => {
@@ -100,9 +112,17 @@ export default function Dashboard() {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!routeAccountId || routeAccountId === activeAccountId) return;
+    window.localStorage.setItem("discord-active-account", routeAccountId);
+    setActiveAccountId(routeAccountId);
+    queryClient.invalidateQueries();
+  }, [routeAccountId, activeAccountId, queryClient]);
+
   const switchAccount = (accountId: AccountId) => {
     window.localStorage.setItem("discord-active-account", accountId);
     setActiveAccountId(accountId);
+    setLocation(`/dashboard/${accountId}`);
     queryClient.invalidateQueries();
   };
 
@@ -138,10 +158,11 @@ export default function Dashboard() {
   const changeNickname = useChangeNickname();
 
   useEffect(() => {
-    if (!stateLoading && botState && !botState.connected) {
+    const anotherAccountIsConnected = accountSummaries.some((account) => account.state.connected);
+    if (!stateLoading && accountsLoaded && botState && !botState.connected && !anotherAccountIsConnected) {
       setLocation("/login");
     }
-  }, [botState, stateLoading, setLocation]);
+  }, [accountSummaries, accountsLoaded, botState, stateLoading, setLocation]);
 
   const [customText, setCustomText] = useState("");
   useEffect(() => {
