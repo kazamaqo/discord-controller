@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { accountIdFromValue, getBotManager, isAccountId, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
-import { JoinVoiceBody, PlayMusicBody } from "@workspace/api-zod";
+import { JoinVoiceBody, MultiVoiceJoinBody, PlayMusicBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
@@ -41,14 +41,18 @@ router.post("/voice/join", async (req, res): Promise<void> => {
 });
 
 router.post("/voice/join-all", async (req, res): Promise<void> => {
-  const parsed = JoinVoiceBody.safeParse(req.body);
-  const requestedAccountIds = Array.isArray(req.body?.accountIds) ? req.body.accountIds : [];
-  const accountIds: AccountId[] = [...new Set(requestedAccountIds.filter(isAccountId) as AccountId[])];
-
-  if (!parsed.success || accountIds.length === 0) {
+  const parsed = MultiVoiceJoinBody.safeParse(req.body);
+  if (!parsed.success) {
     res.status(400).json({ error: "Select at least one valid account and provide a guild and channel" });
     return;
   }
+
+  const requestedAccountIds = [...new Set(parsed.data.accountIds)];
+  if (requestedAccountIds.some((accountId) => !isAccountId(accountId))) {
+    res.status(400).json({ error: "One or more selected accounts are invalid" });
+    return;
+  }
+  const accountIds = requestedAccountIds as AccountId[];
 
   const results = await Promise.all(
     accountIds.map(async (accountId) => {
