@@ -441,7 +441,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Header / Identity */>
+        {/* Header / Identity */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-card border border-border p-6 rounded-xl shadow-lg">
           <div className="flex items-center gap-6">
             <div className="relative">
