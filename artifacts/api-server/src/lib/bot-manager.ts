@@ -229,10 +229,24 @@ class BotManager {
     } else if (atype === "watching") {
       activities.push({ name: this.state.activitySongTitle ?? "something", type: 3 });
     } else if (atype === "streaming") {
+      const streamImageUrl = this.state.activityImageUrl?.trim();
       activities.push({
         name: this.state.activitySongTitle ?? "stream",
         type: 1,
         url: `https://twitch.tv/${this.state.activityTwitchId ?? "discord"}`,
+        details: "Live on Twitch",
+        state: this.state.activityTwitchId
+          ? `twitch.tv/${this.state.activityTwitchId}`
+          : "Streaming now",
+        ...(streamImageUrl
+          ? {
+              assets: {
+                large_image: streamImageUrl,
+                large_text: this.state.activitySongTitle ?? "Twitch stream",
+                small_text: "Twitch",
+              },
+            }
+          : {}),
       });
     } else if (atype === "competing") {
       activities.push({ name: this.state.activitySongTitle ?? "a tournament", type: 5 });

@@ -123,7 +123,10 @@ export default function Dashboard() {
         setActivityArtist(botState.activityArtist || "");
         setActivityAlbum(botState.activityAlbum || "");
         setActivityImageUrl(botState.activityImageUrl || "");
-        setActivityTwitchId(botState.activityTwitchId || "");
+        setActivityTwitchId(
+          botState.activityTwitchId ||
+            (botState.activityType === "streaming" ? "1098046431" : ""),
+        );
         
         if (botState.activityType !== "none" && botState.activityType !== "spotify") {
            setActivityGame(botState.activitySongTitle || ""); 
@@ -141,8 +144,9 @@ export default function Dashboard() {
       data.imageUrl = activityImageUrl;
     } else if (activityType !== "none") {
       data.songTitle = activityGame;
+      data.imageUrl = activityImageUrl;
       if (activityType === "streaming") {
-        data.twitchId = activityTwitchId;
+        data.twitchId = activityTwitchId || "1098046431";
       }
     }
 
@@ -202,7 +206,7 @@ export default function Dashboard() {
   const [activityArtist, setActivityArtist] = useState("");
   const [activityAlbum, setActivityAlbum] = useState("");
   const [activityImageUrl, setActivityImageUrl] = useState("");
-  const [activityTwitchId, setActivityTwitchId] = useState("");
+  const [activityTwitchId, setActivityTwitchId] = useState("1098046431");
   const [activityGame, setActivityGame] = useState("");
   const [albumArtMode, setAlbumArtMode] = useState<"url" | "file">("url");
   const albumArtFileRef = useRef<HTMLInputElement>(null);
@@ -603,14 +607,80 @@ export default function Dashboard() {
                     </Label>
                     <Input value={activityGame} onChange={e => setActivityGame(e.target.value)} className="font-sans" placeholder="Enter activity detail..." />
                      {activityType === "streaming" && (
-                       <div className="space-y-2">
-                         <Label className="text-[10px] uppercase text-muted-foreground">Twitch ID</Label>
-                         <Input
-                           value={activityTwitchId}
-                           onChange={e => setActivityTwitchId(e.target.value)}
-                           className="font-sans"
-                           placeholder="channel name or Twitch ID"
-                         />
+                        <div className="space-y-4 pt-1">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] uppercase text-muted-foreground">Twitch ID</Label>
+                            <Input
+                              value={activityTwitchId}
+                              onChange={e => setActivityTwitchId(e.target.value)}
+                              className="font-sans"
+                              placeholder="channel name or Twitch ID"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <Label className="text-[10px] uppercase text-muted-foreground">Stream Image</Label>
+                              <div className="flex gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={albumArtMode === "url" ? "default" : "outline"}
+                                  className="h-6 text-[10px] px-2"
+                                  onClick={() => setAlbumArtMode("url")}
+                                >
+                                  <Link className="w-3 h-3 mr-1" /> URL
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant={albumArtMode === "file" ? "default" : "outline"}
+                                  className="h-6 text-[10px] px-2"
+                                  onClick={() => { setAlbumArtMode("file"); albumArtFileRef.current?.click(); }}
+                                >
+                                  <ImagePlus className="w-3 h-3 mr-1" /> Gallery
+                                </Button>
+                              </div>
+                            </div>
+                            {albumArtMode === "url" ? (
+                              <Input
+                                value={activityImageUrl}
+                                onChange={e => setActivityImageUrl(e.target.value)}
+                                className="h-8 text-sm"
+                                placeholder="https://..."
+                              />
+                            ) : (
+                              <div
+                                className="h-8 flex items-center gap-2 px-3 rounded-md border border-border bg-background cursor-pointer text-xs text-muted-foreground hover:border-primary/50 transition-colors"
+                                onClick={() => albumArtFileRef.current?.click()}
+                              >
+                                <ImagePlus className="w-3 h-3 shrink-0" />
+                                {activityImageUrl.startsWith("data:") ? "Image selected ✓" : "Tap to pick from gallery"}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="p-4 rounded-xl border border-[#9146ff]/30 bg-[#1d1233] flex items-center gap-4 relative overflow-hidden">
+                            <div className="w-16 h-16 rounded-md overflow-hidden bg-[#9146ff]/10 shrink-0 border border-[#9146ff]/20 flex items-center justify-center">
+                              {activityImageUrl ? (
+                                <img src={activityImageUrl} alt="Stream artwork" className="w-full h-full object-cover" />
+                              ) : (
+                                <MonitorPlay className="w-8 h-8 text-[#9146ff]/60" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0 font-sans z-10">
+                              <h4 className="font-bold text-base truncate text-white leading-tight">
+                                {activityGame || "Stream title"}
+                              </h4>
+                              <p className="text-sm text-gray-300 truncate">
+                                twitch.tv/{activityTwitchId || "1098046431"}
+                              </p>
+                              <p className="text-[10px] uppercase tracking-wider text-[#b98cff] mt-1 font-bold">
+                                Streaming on Twitch
+                              </p>
+                            </div>
+                            <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#1d1233] to-transparent pointer-events-none" />
+                          </div>
                        </div>
                      )}
                   </div>
