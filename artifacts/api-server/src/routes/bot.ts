@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from "express";
-import { getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
+import { accountIdFromValue, getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
 import {
   ConnectBotBody,
@@ -11,10 +11,7 @@ import {
 const router: IRouter = Router();
 
 function accountIdFromRequest(req: Request, bodyAccountId?: unknown): AccountId {
-  if (bodyAccountId === "secondary" || req.get("x-discord-account") === "secondary") {
-    return "secondary";
-  }
-  return "primary";
+  return accountIdFromValue(bodyAccountId ?? req.get("x-discord-account"));
 }
 
 router.get("/bot/accounts", async (_req, res): Promise<void> => {

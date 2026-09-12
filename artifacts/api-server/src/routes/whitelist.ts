@@ -1,11 +1,11 @@
 import { Router, type IRouter, type Request } from "express";
-import { getBotManager, type AccountId } from "../lib/bot-manager";
+import { accountIdFromValue, getBotManager, type AccountId } from "../lib/bot-manager";
 import { AddToWhitelistBody, RemoveFromWhitelistParams } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
 function accountIdFromRequest(req: Request): AccountId {
-  return req.get("x-discord-account") === "secondary" ? "secondary" : "primary";
+  return accountIdFromValue(req.get("x-discord-account"));
 }
 
 router.get("/whitelist", async (req, res): Promise<void> => {

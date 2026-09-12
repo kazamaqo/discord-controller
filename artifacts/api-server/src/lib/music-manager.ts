@@ -12,6 +12,7 @@ import {
 import ytdl from "@distube/ytdl-core";
 import { type Client } from "discord.js-selfbot-v13";
 import { logger } from "./logger";
+import type { AccountId } from "./bot-manager";
 
 export interface VoiceState {
   inVoice: boolean;
@@ -173,9 +174,9 @@ export class MusicManager {
   }
 }
 
-const musicManagers = new Map<string, MusicManager>();
+const musicManagers = new Map<AccountId, MusicManager>();
 
-export function getMusicManager(accountId = "primary"): MusicManager {
+export function getMusicManager(accountId: AccountId = "primary"): MusicManager {
   const existing = musicManagers.get(accountId);
   if (existing) return existing;
   const manager = new MusicManager();

@@ -233,6 +233,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /voice/join-all:
+    post:
+      operationId: joinAllVoice
+      tags: [voice]
+      summary: Join a voice channel with multiple connected accounts simultaneously
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MultiVoiceJoinInput"
+      responses:
+        "200":
+          description: Per-account join results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MultiVoiceJoinResponse"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /voice/play:
     post:
       operationId: playMusic
@@ -381,7 +406,7 @@ components:
           type: string
         accountId:
           type: string
-          enum: [primary, secondary]
+          enum: [primary, secondary, account3, account4, account5]
           description: Account slot to connect; defaults to primary
 
     StatusInput:
@@ -522,6 +547,46 @@ components:
           type: string
         guildId:
           type: string
+
+    MultiVoiceJoinInput:
+      type: object
+      required: [channelId, guildId, accountIds]
+      properties:
+        channelId:
+          type: string
+        guildId:
+          type: string
+        accountIds:
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            enum: [primary, secondary, account3, account4, account5]
+
+    MultiVoiceJoinResponse:
+      type: object
+      required: [results, joined, failed]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [accountId, ok]
+            properties:
+              accountId:
+                type: string
+                enum: [primary, secondary, account3, account4, account5]
+              ok:
+                type: boolean
+              error:
+                type: string
+              state:
+                $ref: "#/components/schemas/VoiceState"
+        joined:
+          type: integer
+        failed:
+          type: integer
 
     PlayMusicInput:
       type: object

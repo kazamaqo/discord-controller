@@ -71,16 +71,20 @@ import { Form, FormControl, FormField, FormItem, FormMessage } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5";
+const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
+
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [activeAccountId, setActiveAccountId] = useState<"primary" | "secondary">(() => {
+  const [activeAccountId, setActiveAccountId] = useState<AccountId>(() => {
     if (typeof window === "undefined") return "primary";
-    return window.localStorage.getItem("discord-active-account") === "secondary" ? "secondary" : "primary";
+    const stored = window.localStorage.getItem("discord-active-account");
+    return ACCOUNT_IDS.includes(stored as AccountId) ? (stored as AccountId) : "primary";
   });
   const [accountSummaries, setAccountSummaries] = useState<Array<{
-    id: "primary" | "secondary";
+    id: AccountId;
     label: string;
     state: { connected: boolean; username?: string | null };
   }>>([]);
@@ -96,7 +100,7 @@ export default function Dashboard() {
     return () => window.clearInterval(interval);
   }, []);
 
-  const switchAccount = (accountId: "primary" | "secondary") => {
+  const switchAccount = (accountId: AccountId) => {
     window.localStorage.setItem("discord-active-account", accountId);
     setActiveAccountId(accountId);
     queryClient.invalidateQueries();
@@ -220,6 +224,8 @@ export default function Dashboard() {
 
   const [joinGuildId, setJoinGuildId] = useState("");
   const [joinChannelId, setJoinChannelId] = useState("");
+  const [voiceAccountIds, setVoiceAccountIds] = useState<AccountId[]>([...ACCOUNT_IDS]);
+  const [joinAllPending, setJoinAllPending] = useState(false);
   const [musicQuery, setMusicQuery] = useState("");
 
   const [newUsername, setNewUsername] = useState("");
@@ -329,6 +335,45 @@ export default function Dashboard() {
     });
   };
 
+  const handleJoinAllVoice = async () => {
+    const connectedAccountIds = voiceAccountIds.filter((accountId) =>
+      accountSummaries.some((account) => account.id === accountId && account.state.connected),
+    );
+    if (!joinGuildId || !joinChannelId || connectedAccountIds.length === 0) return;
+
+    setJoinAllPending(true);
+    try {
+      const response = await fetch("/api/voice/join-all", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          guildId: joinGuildId,
+          channelId: joinChannelId,
+          accountIds: connectedAccountIds,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to join selected accounts");
+      }
+      const failed = payload?.failed ?? 0;
+      toast({
+        title: failed === 0 ? "All selected accounts joined" : "Some accounts could not join",
+        description: `${payload?.joined ?? 0} joined · ${failed} failed`,
+        variant: failed === 0 ? undefined : "destructive",
+      });
+      queryClient.invalidateQueries();
+    } catch (error) {
+      toast({
+        title: error instanceof Error ? error.message : "Failed to join selected accounts",
+        variant: "destructive",
+      });
+    } finally {
+      setJoinAllPending(false);
+    }
+  };
+
   const handlePlayMusic = () => {
     if (!musicQuery) return;
     playMusic.mutate({ data: { query: musicQuery } }, {
@@ -428,12 +473,12 @@ export default function Dashboard() {
             <p className="text-sm text-foreground">Switching accounts keeps presence, whitelist, profile, and voice controls separate.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Select value={activeAccountId} onValueChange={(value) => switchAccount(value as "primary" | "secondary")}>
+            <Select value={activeAccountId} onValueChange={(value) => switchAccount(value as AccountId)}>
               <SelectTrigger className="w-40 h-10"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {["primary", "secondary"].map((accountId) => {
+                {ACCOUNT_IDS.map((accountId) => {
                   const account = accountSummaries.find((item) => item.id === accountId);
-                  return <SelectItem key={accountId} value={accountId}>{account?.label || (accountId === "primary" ? "Account 1" : "Account 2")}{account?.state.connected ? " · " + (account.state.username || "connected") : " · offline"}</SelectItem>;
+                  return <SelectItem key={accountId} value={accountId}>{account?.label || `Account ${ACCOUNT_IDS.indexOf(accountId) + 1}`}{account?.state.connected ? " · " + (account.state.username || "connected") : " · offline"}</SelectItem>;
                 })}
               </SelectContent>
             </Select>
@@ -939,7 +984,36 @@ export default function Dashboard() {
                         className="h-9 font-mono text-sm bg-transparent"
                       />
                       <Button onClick={handleJoinVoice} disabled={joinVoice.isPending || !joinGuildId || !joinChannelId} className="h-9 px-4 shrink-0 uppercase text-xs tracking-wider">
-                        Join
+                        Join active
+                      </Button>
+                    </div>
+                    <div className="space-y-2 rounded-md border border-border/70 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Join simultaneously</Label>
+                        <span className="text-[10px] text-muted-foreground">
+                          {voiceAccountIds.filter((accountId) => accountSummaries.some((account) => account.id === accountId && account.state.connected)).length} selected
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {accountSummaries.map((account) => {
+                          const checked = voiceAccountIds.includes(account.id);
+                          return (
+                            <label key={account.id} className={`flex items-center gap-2 rounded border px-2 py-1.5 text-xs ${account.state.connected ? "cursor-pointer border-border" : "cursor-not-allowed border-border/40 opacity-50"}`}>
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                disabled={!account.state.connected}
+                                onChange={() => setVoiceAccountIds((current) => checked ? current.filter((id) => id !== account.id) : [...current, account.id])}
+                                className="accent-primary"
+                              />
+                              <span className="truncate">{account.label}</span>
+                              <span className="ml-auto text-[10px] text-muted-foreground">{account.state.connected ? "ready" : "offline"}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      <Button onClick={() => void handleJoinAllVoice()} disabled={joinAllPending || !joinGuildId || !joinChannelId || !voiceAccountIds.some((accountId) => accountSummaries.some((account) => account.id === accountId && account.state.connected))} className="w-full h-9 uppercase text-xs tracking-wider">
+                        {joinAllPending ? "Joining selected accounts..." : "Join selected accounts together"}
                       </Button>
                     </div>
                   </div>

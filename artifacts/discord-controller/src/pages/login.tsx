@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
 type AccountSummary = {
-  id: "primary" | "secondary";
+  id: AccountId;
   label: string;
   state: { connected: boolean; username?: string | null; userId?: string | null };
 };
 
-const ACCOUNT_IDS = ["primary", "secondary"] as const;
+type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5";
+const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
+const fallbackAccountLabel = (accountId: AccountId) => `Account ${ACCOUNT_IDS.indexOf(accountId) + 1}`;
 
 export default function Login() {
   const [, setLocation] = useLocation();
@@ -19,8 +21,14 @@ export default function Login() {
   const [dashboardPassword, setDashboardPassword] = useState("");
   const [passwordPending, setPasswordPending] = useState(false);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [tokens, setTokens] = useState<Record<string, string>>({ primary: "", secondary: "" });
-  const [pendingAccount, setPendingAccount] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<Record<AccountId, string>>({
+    primary: "",
+    secondary: "",
+    account3: "",
+    account4: "",
+    account5: "",
+  });
+  const [pendingAccount, setPendingAccount] = useState<AccountId | null>(null);
 
   const loadAccounts = async () => {
     const response = await fetch("/api/bot/accounts", { credentials: "same-origin" });
@@ -112,9 +120,9 @@ export default function Login() {
       <div className="w-full max-w-2xl space-y-6">
         <div className="text-center space-y-2">
           <p className="text-red-500 font-bold text-xl tracking-widest uppercase">Discord account controller</p>
-          <p className="text-zinc-500 text-sm font-mono">Connect both accounts here. They run independently and can be switched from the dashboard.</p>
+          <p className="text-zinc-500 text-sm font-mono">Connect up to five accounts. They run independently and can join voice channels together.</p>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {ACCOUNT_IDS.map((accountId) => {
             const account = accounts.find((item) => item.id === accountId);
             const connected = account?.state.connected;
@@ -122,7 +130,7 @@ export default function Login() {
               <div key={accountId} className="rounded-xl border border-[#222] bg-[#0a0a0a] p-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-white font-bold uppercase tracking-widest">{account?.label || (accountId === "primary" ? "Account 1" : "Account 2")}</p>
+                    <p className="text-white font-bold uppercase tracking-widest">{account?.label || fallbackAccountLabel(accountId)}</p>
                     <p className="text-xs text-zinc-500 font-mono">{connected ? "Connected as " + (account?.state.username || "unknown") : "Not connected"}</p>
                   </div>
                   <span className={connected ? "text-green-500 text-xs" : "text-zinc-600 text-xs"}>{connected ? "● ONLINE" : "○ OFFLINE"}</span>

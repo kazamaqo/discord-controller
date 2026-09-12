@@ -274,10 +274,18 @@ export class BotManager {
 
 }
 
-export const ACCOUNT_IDS = ["primary", "secondary"] as const;
+export const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
 export type AccountId = (typeof ACCOUNT_IDS)[number];
 
 const accountManagers = new Map<AccountId, BotManager>();
+
+export function isAccountId(value: unknown): value is AccountId {
+  return typeof value === "string" && (ACCOUNT_IDS as readonly string[]).includes(value);
+}
+
+export function accountIdFromValue(value: unknown): AccountId {
+  return isAccountId(value) ? value : "primary";
+}
 
 export function getBotManager(accountId: AccountId = "primary"): BotManager {
   const existing = accountManagers.get(accountId);
@@ -290,7 +298,7 @@ export function getBotManager(accountId: AccountId = "primary"): BotManager {
 export function getAccountSummaries(): { id: AccountId; label: string; state: BotState }[] {
   return ACCOUNT_IDS.map((id) => ({
     id,
-    label: id === "primary" ? "Account 1" : "Account 2",
+    label: `Account ${ACCOUNT_IDS.indexOf(id) + 1}`,
     state: getBotManager(id).getState(),
   }));
 }
