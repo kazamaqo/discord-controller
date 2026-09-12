@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type BotStateStatus = typeof BotStateStatus[keyof typeof BotStateStatus];
+export type StatusInputStatus = typeof StatusInputStatus[keyof typeof StatusInputStatus];
 
 
-export const BotStateStatus = {
+export const StatusInputStatus = {
   online: 'online',
   idle: 'idle',
   dnd: 'dnd',
