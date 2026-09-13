@@ -15,6 +15,7 @@ const HELP_MESSAGE = [
   ANSI + "1;33m- xstop" + ANSI + "0m",
   ANSI + "1;35m- xwhitelist list|add <user-id> <label>|remove <entry-id>" + ANSI + "0m",
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
+  ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact @user <emoji-id> <account-count>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact off" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
@@ -91,6 +92,23 @@ async function handleAutoreactMessage(accountId: AccountId, message: any): Promi
   } catch {
     // A missing emoji, inaccessible message, or rate limit must not stop other accounts.
   }
+}
+
+function extractInviteCode(value: string): string | null {
+  let normalized = value.trim();
+  for (const prefix of ["https://", "http://"]) {
+    if (normalized.toLowerCase().startsWith(prefix)) normalized = normalized.slice(prefix.length);
+  }
+  if (normalized.toLowerCase().startsWith("www.")) normalized = normalized.slice(4);
+  const segments = normalized.split("/").filter(Boolean);
+  const host = segments[0]?.toLowerCase();
+  if (host === "discord.gg" && segments[1]) return segments[1].split("?")[0];
+  if ((host === "discord.com" || host === "discordapp.com") && segments[1]?.toLowerCase() === "invite" && segments[2]) return segments[2].split("?")[0];
+  return null;
+}
+
+function accountLabel(accountId: AccountId): string {
+  return "Account " + (ACCOUNT_IDS.indexOf(accountId) + 1);
 }
 
 async function handleCommand(message: any): Promise<void> {
@@ -212,6 +230,60 @@ async function handleCommand(message: any): Promise<void> {
     if (!member) throw new Error("Primary account is not in that guild");
     await member.setNickname(nickname);
     await replyAndDelete(message, "Primary nickname updated");
+    return;
+  }
+  if (command === "link") {
+    const inviteCode = extractInviteCode(args.join(" "));
+    if (!inviteCode) {
+      await send(message, "Usage: xlink <discord.gg or discord.com/invite link>");
+      return;
+    }
+
+    const connectedAccountIds = ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
+    if (!connectedAccountIds.length) {
+      await send(message, "No connected accounts are available");
+      return;
+    }
+
+    const joined: AccountId[] = [];
+    const skipped: AccountId[] = [];
+    const failed: string[] = [];
+    for (const accountId of connectedAccountIds) {
+      const client = getBotManager(accountId).getClient() as any;
+      if (!client) {
+        failed.push(accountLabel(accountId) + " (client unavailable)");
+        continue;
+      }
+
+      try {
+        const invite = await client.fetchInvite(inviteCode);
+        const guildId = invite.guild?.id ?? invite.guild?.guildId;
+        if (guildId && client.guilds.cache.has(guildId)) {
+          skipped.push(accountId);
+          continue;
+        }
+
+        if (typeof client.acceptInvite === "function") {
+          await client.acceptInvite(inviteCode);
+        } else if (typeof invite.accept === "function") {
+          await invite.accept();
+        } else {
+          throw new Error("This Discord client cannot accept invites");
+        }
+        joined.push(accountId);
+      } catch (error: unknown) {
+        const detail = error instanceof Error ? error.message : "invite rejected";
+        failed.push(accountLabel(accountId) + " (" + detail.slice(0, 120) + ")");
+      }
+    }
+
+    const lines = [
+      "xlink complete for " + inviteCode,
+      "Joined: " + (joined.length ? joined.map(accountLabel).join(", ") : "none"),
+      "Already joined: " + (skipped.length ? skipped.map(accountLabel).join(", ") : "none"),
+      "Failed: " + (failed.length ? failed.join(", ") : "none"),
+    ];
+    await replyAndDelete(message, lines.join(NL));
     return;
   }
   if (command === "autoreact") {
