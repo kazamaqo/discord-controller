@@ -71,12 +71,12 @@ function mentionedUser(message: any, args: string[]): { id: string; label: strin
   }
 
   const rawMention = args[0] ?? "";
-  const match = rawMention.match(/^<@!?(\\d+)>$/);
+  const match = rawMention.match(/^<@!?(\d+)>$/);
   return match ? { id: match[1], label: rawMention } : null;
 }
 
 function validEmojiId(value: string): boolean {
-  return /^\\d{5,25}$/.test(value) || /^[\\w~]+:\\d{5,25}$/.test(value);
+  return /^\d{5,25}$/.test(value) || /^[\w~]+:\d{5,25}$/.test(value);
 }
 
 async function handleAutoreactMessage(accountId: AccountId, message: any): Promise<void> {

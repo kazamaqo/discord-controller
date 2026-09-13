@@ -8,7 +8,6 @@ import {
   SetActivityBody,
   MassDmBody,
 } from "@workspace/api-zod";
-import { installSecondaryCommandListener } from "../lib/command-listener";
 import { saveAccountToken } from "../lib/token-store";
 
 const router: IRouter = Router();
