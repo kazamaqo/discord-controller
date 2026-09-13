@@ -15,6 +15,7 @@ const HELP_MESSAGE = [
   ANSI + "1;33m- xstop" + ANSI + "0m",
   ANSI + "1;35m- xwhitelist list|add <user-id> <label>|remove <entry-id>" + ANSI + "0m",
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
+  ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact @user <emoji-id> <account-count>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact off" + ANSI + "0m",
@@ -215,6 +216,55 @@ async function handleCommand(message: any): Promise<void> {
       return;
     }
     await send(message, "Usage: xwhitelist list|add <user-id> <label>|remove <entry-id>");
+    return;
+  }
+  if (command === "nick") {
+    const nickname = args.join(" ").trim();
+    const guildId = message.guild?.id ?? message.channel?.guild?.id;
+    if (!guildId || !nickname) {
+      await send(message, "Usage: xnick <nickname> (in a server channel)");
+      return;
+    }
+    if (nickname.length > 32) {
+      await send(message, "Nickname must be 32 characters or fewer");
+      return;
+    }
+
+    const connectedAccountIds = ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
+    if (!connectedAccountIds.length) {
+      await send(message, "No connected accounts are available");
+      return;
+    }
+
+    const updated: AccountId[] = [];
+    const skipped: AccountId[] = [];
+    const failed: string[] = [];
+    for (const accountId of connectedAccountIds) {
+      const client = getBotManager(accountId).getClient() as any;
+      const guild = client?.guilds?.cache?.get(guildId);
+      if (!guild) {
+        skipped.push(accountId);
+        continue;
+      }
+
+      try {
+        const member = guild.members.me;
+        if (!member) throw new Error("member unavailable");
+        await member.setNickname(nickname);
+        updated.push(accountId);
+      } catch (error: unknown) {
+        const detail = error instanceof Error ? error.message : "nickname update failed";
+        failed.push(accountLabel(accountId) + " (" + detail.slice(0, 120) + ")");
+      }
+    }
+
+    const lines = [
+      "xnick complete: " + nickname,
+      "Updated: " + (updated.length ? updated.map(accountLabel).join(", ") : "none"),
+      "Not in server: " + (skipped.length ? skipped.map(accountLabel).join(", ") : "none"),
+      "Failed: " + (failed.length ? failed.join(", ") : "none"),
+    ];
+    await replyAndDelete(message, lines.join(NL));
     return;
   }
   if (command === "nickname") {
