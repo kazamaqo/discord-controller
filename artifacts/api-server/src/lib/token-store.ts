@@ -6,6 +6,19 @@ import { logger } from "./logger";
 const TABLE_SQL = "CREATE TABLE IF NOT EXISTS discord_account_tokens (account_id TEXT PRIMARY KEY, encrypted_token TEXT NOT NULL, iv TEXT NOT NULL, auth_tag TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
 let poolPromise: Promise<any> | null = null;
 
+function getEnvironmentToken(accountId: AccountId): string | null {
+  const accountNumber = ACCOUNT_IDS.indexOf(accountId) + 1;
+  const names = ["DISCORD_ACCOUNT_" + accountNumber + "_TOKEN"];
+  if (accountId === "primary") names.push("DISCORD_PRIMARY_TOKEN");
+  if (accountId === "secondary") names.push("DISCORD_SECONDARY_TOKEN");
+
+  for (const name of names) {
+    const token = process.env[name]?.trim();
+    if (token) return token;
+  }
+  return null;
+}
+
 async function getPool(): Promise<any> {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required for persistent account tokens");
@@ -63,25 +76,31 @@ async function loadAccountTokens(): Promise<Map<AccountId, string>> {
 }
 
 export async function restoreSavedAccounts(): Promise<void> {
-  if (!process.env.DATABASE_URL) {
-    logger.warn("DATABASE_URL is not configured; saved Discord accounts will not be restored");
-    return;
-  }
-  try {
-    const tokens = await loadAccountTokens();
-    for (const accountId of ACCOUNT_IDS) {
-      const token = tokens.get(accountId);
-      if (!token) continue;
-      try {
-        await getBotManager(accountId).connect(token);
-        if (accountId === "primary") installPrimaryCommandListener();
-        installAccountAutomationListener(accountId);
-        logger.info({ accountId }, "Restored saved Discord account");
-      } catch (error) {
-        logger.warn({ err: error, accountId }, "Saved Discord account could not be restored");
-      }
+  const databaseTokens = new Map<AccountId, string>();
+
+  if (process.env.DATABASE_URL) {
+    try {
+      const loadedTokens = await loadAccountTokens();
+      for (const [accountId, token] of loadedTokens) databaseTokens.set(accountId, token);
+    } catch (error) {
+      logger.warn({ err: error }, "Saved Discord accounts could not be loaded from database");
     }
-  } catch (error) {
-    logger.warn({ err: error }, "Saved Discord accounts could not be loaded");
+  } else {
+    logger.warn("DATABASE_URL is not configured; startup restore will use DISCORD_ACCOUNT_*_TOKEN variables");
+  }
+
+  for (const accountId of ACCOUNT_IDS) {
+    const environmentToken = getEnvironmentToken(accountId);
+    const token = environmentToken ?? databaseTokens.get(accountId);
+    if (!token) continue;
+
+    try {
+      await getBotManager(accountId).connect(token);
+      if (accountId === "primary") installPrimaryCommandListener();
+      installAccountAutomationListener(accountId);
+      logger.info({ accountId, source: environmentToken ? "environment" : "database" }, "Restored saved Discord account");
+    } catch (error) {
+      logger.warn({ err: error, accountId }, "Saved Discord account could not be restored");
+    }
   }
 }
