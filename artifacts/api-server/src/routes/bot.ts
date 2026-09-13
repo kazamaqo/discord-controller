@@ -37,13 +37,9 @@ router.post("/bot/connect", async (req, res): Promise<void> => {
     try {
       await saveAccountToken(accountId, parsed.data.token);
     } catch (error) {
-      req.log.error({ err: error, accountId }, "Account connected but token persistence failed");
-      const detail = error instanceof Error ? error.message : "database or encryption configuration is missing";
-      res.status(503).json({
-        error: "Account connected but persistent token storage is unavailable",
-        message: `${detail}. Configure DATABASE_URL and a stable token encryption secret (TOKEN_ENCRYPTION_KEY recommended), then reconnect the account.`,
-      });
-      return;
+      req.log.warn({ err: error, accountId }, "Account connected; token was not saved to database");
+      // Environment-token startup is supported when DATABASE_URL is unavailable.
+      // The account is already connected, so do not report a false connection failure.
     }
     res.json(state);
   } catch (err: unknown) {
