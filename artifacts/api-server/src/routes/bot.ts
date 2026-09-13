@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { accountIdFromValue, getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
-import { installAccountAutomationListener, installSecondaryCommandListener } from "../lib/command-listener";
+import { installAccountAutomationListener, installCommandListener } from "../lib/command-listener";
 import {
   ConnectBotBody,
   SetStatusBody,
@@ -30,15 +30,21 @@ router.post("/bot/connect", async (req, res): Promise<void> => {
   const manager = getBotManager(accountId);
   try {
     const state = await manager.connect(parsed.data.token);
+    // Attach command and automation listeners as soon as Discord is ready.
+    // Persistence must not leave a currently connected account inert.
+    installCommandListener(accountId);
+    installAccountAutomationListener(accountId);
     try {
       await saveAccountToken(accountId, parsed.data.token);
     } catch (error) {
       req.log.error({ err: error, accountId }, "Account connected but token persistence failed");
-      res.status(503).json({ error: "Account connected but persistent token storage is unavailable" });
+      const detail = error instanceof Error ? error.message : "database or encryption configuration is missing";
+      res.status(503).json({
+        error: "Account connected but persistent token storage is unavailable",
+        message: `${detail}. Configure DATABASE_URL and a stable token encryption secret (TOKEN_ENCRYPTION_KEY recommended), then reconnect the account.`,
+      });
       return;
     }
-    if (accountId === "secondary") installSecondaryCommandListener();
-    installAccountAutomationListener(accountId);
     res.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to connect";

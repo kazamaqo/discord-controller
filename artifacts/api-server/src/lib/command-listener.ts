@@ -35,6 +35,7 @@ type AutoreactConfig = {
 let autoreactConfig: AutoreactConfig | null = null;
 const attachedCommandClients = new WeakSet<object>();
 const attachedAutomationClients = new WeakSet<object>();
+const handledCommandMessages = new Set<string>();
 
 function send(message: any, content: string): Promise<unknown> {
   return message.channel.send(content);
@@ -117,7 +118,17 @@ async function handleCommand(message: any): Promise<void> {
   if (!primaryUserId || message.author?.id !== primaryUserId) return;
   const content = typeof message.content === "string" ? message.content.trim() : "";
   if (!content.toLowerCase().startsWith("x")) return;
-  const parts = content.slice(1).trim().split(/\\s+/).filter(Boolean);
+  const messageId = typeof message.id === "string" ? message.id : null;
+  if (messageId) {
+    if (handledCommandMessages.has(messageId)) return;
+    handledCommandMessages.add(messageId);
+    if (handledCommandMessages.size > 2000) {
+      const oldest = handledCommandMessages.values().next().value;
+      if (oldest) handledCommandMessages.delete(oldest);
+    }
+  }
+
+  const parts = content.slice(1).trim().split(/\s+/).filter(Boolean);
   const command = (parts.shift() ?? "").toLowerCase();
   const args = parts;
   const manager = primaryManager();
@@ -375,8 +386,8 @@ async function handleCommand(message: any): Promise<void> {
   }
 }
 
-export function installSecondaryCommandListener(): void {
-  const client = getBotManager("secondary").getClient() as any;
+export function installCommandListener(accountId: AccountId): void {
+  const client = getBotManager(accountId).getClient() as any;
   if (!client || attachedCommandClients.has(client)) return;
   attachedCommandClients.add(client);
   client.on("messageCreate", (message: any) => {
@@ -389,6 +400,10 @@ export function installSecondaryCommandListener(): void {
       }
     });
   });
+}
+
+export function installSecondaryCommandListener(): void {
+  installCommandListener("secondary");
 }
 
 export function installAccountAutomationListener(accountId: AccountId): void {

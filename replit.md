@@ -9,7 +9,8 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Required env: `DATABASE_URL` — Postgres connection string used for encrypted Discord token storage
+- Required env: `TOKEN_ENCRYPTION_KEY` — stable secret used to encrypt tokens; keep this unchanged across restarts and deployments. `DASHBOARD_PASSWORD` or `SESSION_SECRET` is accepted as a fallback.
 
 ## Stack
 
