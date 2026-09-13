@@ -1,4 +1,4 @@
-import { getBotManager, type ActivityType } from "./bot-manager";
+import { getAccountSummaries, getBotManager, type ActivityType } from "./bot-manager";
     import { getMusicManager } from "./music-manager";
 
     const ANSI = String.fromCharCode(27) + "[";
@@ -35,7 +35,7 @@ import { getBotManager, type ActivityType } from "./bot-manager";
     const manager = primaryManager();
 
     if (command === "help" || command === "setup") { await send(message, HELP_MESSAGE); return; }
-    if (command === "accounts") { const state = manager.getState(); await send(message, "Primary account: " + (state.connected ? "connected" : "disconnected") + NL + (state.username ?? "Not connected")); return; }
+    if (command === "accounts") { const lines = getAccountSummaries().map((account) => account.label + ": " + (account.state.connected ? "connected" : "disconnected") + (account.state.username ? " (" + account.state.username + ")" : "")); await send(message, lines.join(NL)); return; }
     if (command === "status") {
       const requested = args[0]?.toLowerCase();
       if (!requested) { const state = manager.getState(); await send(message, "Primary status: " + state.status + NL + "Activity: " + state.activityType); return; }
