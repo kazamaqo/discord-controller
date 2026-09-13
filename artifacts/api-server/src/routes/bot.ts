@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { accountIdFromValue, getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
-import { installAccountAutomationListener, installCommandListener } from "../lib/command-listener";
+import { installAccountAutomationListener, installSecondaryCommandListener } from "../lib/command-listener";
 import {
   ConnectBotBody,
   SetStatusBody,
@@ -32,7 +32,7 @@ router.post("/bot/connect", async (req, res): Promise<void> => {
     const state = await manager.connect(parsed.data.token);
     // Attach command and automation listeners as soon as Discord is ready.
     // Persistence must not leave a currently connected account inert.
-    installCommandListener(accountId);
+    if (accountId === "secondary") installSecondaryCommandListener();
     installAccountAutomationListener(accountId);
     try {
       await saveAccountToken(accountId, parsed.data.token);

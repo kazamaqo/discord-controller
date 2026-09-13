@@ -9,10 +9,10 @@ const HELP_MESSAGE = [
   ANSI + "1;36m- xhelp [or xsetup]" + ANSI + "0m",
   ANSI + "1;32m- xstatus [online|idle|dnd|invisible|streaming]" + ANSI + "0m",
   ANSI + "1;33m- xactivity <type> <name> [artist] [album] [image-url] [twitch-id]" + ANSI + "0m",
-  ANSI + "1;35m- xjoin vc <guild-id> <channel-id>" + ANSI + "0m",
-  ANSI + "1;31m- xplay <youtube-url>" + ANSI + "0m",
-  ANSI + "1;32m- xpause" + ANSI + "0m",
-  ANSI + "1;33m- xstop" + ANSI + "0m",
+  ANSI + "1;35m- xjoin vc <guild-id> <channel-id> (all connected accounts)" + ANSI + "0m",
+  ANSI + "1;31m- xplay <youtube-url> (all connected accounts)" + ANSI + "0m",
+  ANSI + "1;32m- xpause (all connected accounts)" + ANSI + "0m",
+  ANSI + "1;33m- xstop (all connected accounts)" + ANSI + "0m",
   ANSI + "1;35m- xwhitelist list|add <user-id> <label>|remove <entry-id>" + ANSI + "0m",
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
@@ -113,6 +113,10 @@ function accountLabel(accountId: AccountId): string {
   return "Account " + (ACCOUNT_IDS.indexOf(accountId) + 1);
 }
 
+function connectedAccountIds(): AccountId[] {
+  return ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
+}
+
 async function handleCommand(message: any): Promise<void> {
   const primaryUserId = primaryManager().getState().userId;
   if (!primaryUserId || message.author?.id !== primaryUserId) return;
@@ -145,58 +149,111 @@ async function handleCommand(message: any): Promise<void> {
   if (command === "status") {
     const requested = args[0]?.toLowerCase();
     if (!requested) {
-      const state = manager.getState();
-      await replyAndDelete(message, "Primary status: " + state.status + NL + "Activity: " + state.activityType);
+      const lines = connectedAccountIds().map((accountId) => {
+        const state = getBotManager(accountId).getState();
+        return accountLabel(accountId) + ": " + state.status + NL + "Activity: " + state.activityType;
+      });
+      await replyAndDelete(message, lines.length ? lines.join(NL) : "No connected accounts are available");
       return;
     }
     if (!["online", "idle", "dnd", "invisible", "streaming"].includes(requested)) {
-      await send(message, "Usage: xstatus online|idle|dnd|invisible|streaming");
+      await replyAndDelete(message, "Usage: xstatus online|idle|dnd|invisible|streaming");
       return;
     }
-    const updated = await manager.setStatus(requested as "online" | "idle" | "dnd" | "invisible" | "streaming", null, requested === "streaming" ? args[1] ?? "Twitch" : undefined, requested === "streaming" ? args[2] ?? null : undefined);
-    await replyAndDelete(message, "Primary status set to " + updated.status);
+    const updated: string[] = [];
+    const failed: string[] = [];
+    for (const accountId of connectedAccountIds()) {
+      try {
+        const state = await getBotManager(accountId).setStatus(
+          requested as "online" | "idle" | "dnd" | "invisible" | "streaming",
+          null,
+          requested === "streaming" ? args[1] ?? "Twitch" : undefined,
+          requested === "streaming" ? args[2] ?? null : undefined,
+        );
+        updated.push(accountLabel(accountId) + " (" + state.status + ")");
+      } catch (error: unknown) {
+        failed.push(accountLabel(accountId) + " (" + (error instanceof Error ? error.message : "failed") + ")");
+      }
+    }
+    await replyAndDelete(message, "Status updated: " + (updated.length ? updated.join(", ") : "none") + (failed.length ? NL + "Failed: " + failed.join(", ") : ""));
     return;
   }
   if (command === "activity") {
     const type = args.shift()?.toLowerCase() as ActivityType | undefined;
     if (!type || !["none", "spotify", "playing", "watching", "competing"].includes(type)) {
-      await send(message, "Usage: xactivity none|spotify|playing|watching|competing <name> [artist] [album] [image-url] [twitch-id]");
+      await replyAndDelete(message, "Usage: xactivity none|spotify|playing|watching|competing <name> [artist] [album] [image-url] [twitch-id]");
       return;
     }
-    const updated = await manager.setActivity(type, args.shift() ?? null, args.shift() ?? null, args.shift() ?? null, args.shift() ?? null, args.shift() ?? null);
-    await replyAndDelete(message, "Primary activity set to " + updated.activityType);
+    const songTitle = args.shift() ?? null;
+    const artist = args.shift() ?? null;
+    const album = args.shift() ?? null;
+    const imageUrl = args.shift() ?? null;
+    const twitchId = args.shift() ?? null;
+    const updated: string[] = [];
+    const failed: string[] = [];
+    for (const accountId of connectedAccountIds()) {
+      try {
+        const state = await getBotManager(accountId).setActivity(type, songTitle, artist, album, imageUrl, twitchId);
+        updated.push(accountLabel(accountId) + " (" + state.activityType + ")");
+      } catch (error: unknown) {
+        failed.push(accountLabel(accountId) + " (" + (error instanceof Error ? error.message : "failed") + ")");
+      }
+    }
+    await replyAndDelete(message, "Activity updated: " + (updated.length ? updated.join(", ") : "none") + (failed.length ? NL + "Failed: " + failed.join(", ") : ""));
     return;
   }
   if (command === "join" && args.shift()?.toLowerCase() === "vc") {
     const guildId = args.shift();
     const channelId = args.shift();
-    const client = manager.getClient();
-    if (!guildId || !channelId || !client) {
-      await send(message, "Usage: xjoin vc <guild-id> <channel-id>");
+    if (!guildId || !channelId) {
+      await replyAndDelete(message, "Usage: xjoin vc <guild-id> <channel-id>");
       return;
     }
-    const state = await getMusicManager("primary").join(client, guildId, channelId);
-    await replyAndDelete(message, "Joined " + (state.channelName ?? channelId));
+    const joined: string[] = [];
+    const failed: string[] = [];
+    for (const accountId of connectedAccountIds()) {
+      const client = getBotManager(accountId).getClient();
+      if (!client) {
+        failed.push(accountLabel(accountId) + " (client unavailable)");
+        continue;
+      }
+      try {
+        const state = await getMusicManager(accountId).join(client, guildId, channelId);
+        joined.push(accountLabel(accountId) + " (" + (state.channelName ?? channelId) + ")");
+      } catch (error: unknown) {
+        failed.push(accountLabel(accountId) + " (" + (error instanceof Error ? error.message : "join failed") + ")");
+      }
+    }
+    await replyAndDelete(message, "Joined: " + (joined.length ? joined.join(", ") : "none") + (failed.length ? NL + "Failed: " + failed.join(", ") : ""));
     return;
   }
   if (command === "play") {
     const query = args.join(" ");
     if (!query) {
-      await send(message, "Usage: xplay <youtube-url>");
+      await replyAndDelete(message, "Usage: xplay <youtube-url>");
       return;
     }
-    const state = await getMusicManager("primary").play(query);
-    await replyAndDelete(message, "Playing " + (state.currentTrackTitle ?? query));
+    const playing: string[] = [];
+    const failed: string[] = [];
+    for (const accountId of connectedAccountIds()) {
+      try {
+        const state = await getMusicManager(accountId).play(query);
+        playing.push(accountLabel(accountId) + " (" + (state.currentTrackTitle ?? query) + ")");
+      } catch (error: unknown) {
+        failed.push(accountLabel(accountId) + " (" + (error instanceof Error ? error.message : "play failed") + ")");
+      }
+    }
+    await replyAndDelete(message, "Playing: " + (playing.length ? playing.join(", ") : "none") + (failed.length ? NL + "Failed: " + failed.join(", ") : ""));
     return;
   }
   if (command === "pause") {
-    const state = getMusicManager("primary").pause();
-    await replyAndDelete(message, state.paused ? "Playback paused" : "Playback resumed");
+    const states = connectedAccountIds().map((accountId) => getMusicManager(accountId).pause());
+    await replyAndDelete(message, states.some((state) => state.paused) ? "Playback paused for connected accounts" : "Playback resumed for connected accounts");
     return;
   }
   if (command === "stop") {
-    getMusicManager("primary").stop();
-    await replyAndDelete(message, "Playback stopped");
+    connectedAccountIds().forEach((accountId) => getMusicManager(accountId).stop());
+    await replyAndDelete(message, "Playback stopped for connected accounts");
     return;
   }
   if (command === "whitelist") {
@@ -210,7 +267,7 @@ async function handleCommand(message: any): Promise<void> {
       const userId = args.shift();
       const label = args.join(" ");
       if (!userId || !label) {
-        await send(message, "Usage: xwhitelist add <user-id> <label>");
+        await replyAndDelete(message, "Usage: xwhitelist add <user-id> <label>");
         return;
       }
       const entry = manager.addToWhitelist(userId, label);
@@ -220,30 +277,30 @@ async function handleCommand(message: any): Promise<void> {
     if (action === "remove") {
       const id = args.shift();
       if (!id || !manager.removeFromWhitelist(id)) {
-        await send(message, "Whitelist entry not found");
+        await replyAndDelete(message, "Whitelist entry not found");
         return;
       }
       await replyAndDelete(message, "Whitelist entry removed");
       return;
     }
-    await send(message, "Usage: xwhitelist list|add <user-id> <label>|remove <entry-id>");
+    await replyAndDelete(message, "Usage: xwhitelist list|add <user-id> <label>|remove <entry-id>");
     return;
   }
   if (command === "nick") {
     const nickname = args.join(" ").trim();
     const guildId = message.guild?.id ?? message.channel?.guild?.id;
     if (!guildId || !nickname) {
-      await send(message, "Usage: xnick <nickname> (in a server channel)");
+      await replyAndDelete(message, "Usage: xnick <nickname> (in a server channel)");
       return;
     }
     if (nickname.length > 32) {
-      await send(message, "Nickname must be 32 characters or fewer");
+      await replyAndDelete(message, "Nickname must be 32 characters or fewer");
       return;
     }
 
     const connectedAccountIds = ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
     if (!connectedAccountIds.length) {
-      await send(message, "No connected accounts are available");
+      await replyAndDelete(message, "No connected accounts are available");
       return;
     }
 
@@ -284,7 +341,7 @@ async function handleCommand(message: any): Promise<void> {
     const client = manager.getClient();
     const guild = guildId && client?.guilds.cache.get(guildId);
     if (!guild || !nickname) {
-      await send(message, "Usage: xnickname <guild-id> <nickname>");
+      await replyAndDelete(message, "Usage: xnickname <guild-id> <nickname>");
       return;
     }
     const member = guild.members.me;
@@ -296,13 +353,13 @@ async function handleCommand(message: any): Promise<void> {
   if (command === "link") {
     const inviteCode = extractInviteCode(args.join(" "));
     if (!inviteCode) {
-      await send(message, "Usage: xlink <discord.gg or discord.com/invite link>");
+      await replyAndDelete(message, "Usage: xlink <discord.gg or discord.com/invite link>");
       return;
     }
 
     const connectedAccountIds = ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
     if (!connectedAccountIds.length) {
-      await send(message, "No connected accounts are available");
+      await replyAndDelete(message, "No connected accounts are available");
       return;
     }
 
@@ -358,14 +415,14 @@ async function handleCommand(message: any): Promise<void> {
     const emojiId = args[1];
     const requestedCount = Number(args[2]);
     if (!target || !emojiId || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length || !validEmojiId(emojiId)) {
-      await send(message, "Usage: xautoreact @user <emoji-id> <account-count> (1-" + ACCOUNT_IDS.length + ")");
+      await replyAndDelete(message, "Usage: xautoreact @user <emoji-id> <account-count> (1-" + ACCOUNT_IDS.length + ")");
       return;
     }
 
     const accountIds = ACCOUNT_IDS.slice(0, requestedCount);
     const unavailable = accountIds.filter((accountId) => !getBotManager(accountId).getState().connected);
     if (unavailable.length) {
-      await send(message, "Connect these accounts first: " + unavailable.map((accountId) => "Account " + (ACCOUNT_IDS.indexOf(accountId) + 1)).join(", "));
+      await replyAndDelete(message, "Connect these accounts first: " + unavailable.map((accountId) => "Account " + (ACCOUNT_IDS.indexOf(accountId) + 1)).join(", "));
       return;
     }
 
@@ -380,8 +437,7 @@ async function handleCommand(message: any): Promise<void> {
     return;
   }
   if (command === "disconnect") {
-    await send(message, "Primary account disconnected");
-    await deleteControllerMessage(message);
+    await replyAndDelete(message, "Primary account disconnected");
     await manager.disconnect();
   }
 }
@@ -394,7 +450,7 @@ export function installCommandListener(accountId: AccountId): void {
     void handleCommand(message).catch(async (error) => {
       const detail = error instanceof Error ? error.message : "Command failed";
       try {
-        await send(message, "Command failed: " + detail);
+        await replyAndDelete(message, "Command failed: " + detail);
       } catch {
         // Ignore reply failures when the source channel is unavailable.
       }
