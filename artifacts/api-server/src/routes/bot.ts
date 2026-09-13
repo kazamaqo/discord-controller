@@ -28,6 +28,14 @@ router.post("/bot/connect", async (req, res): Promise<void> => {
   const manager = getBotManager(accountId);
   try {
     const state = await manager.connect(parsed.data.token);
+    try {
+      await saveAccountToken(accountId, parsed.data.token);
+    } catch (error) {
+      req.log.error({ err: error, accountId }, "Account connected but token persistence failed");
+      res.status(503).json({ error: "Account connected but persistent token storage is unavailable" });
+      return;
+    }
+    if (accountId === "secondary") installSecondaryCommandListener();
     res.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to connect";
