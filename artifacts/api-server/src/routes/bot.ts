@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { accountIdFromValue, getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
+import { installAccountAutomationListener, installSecondaryCommandListener } from "../lib/command-listener";
 import {
   ConnectBotBody,
   SetStatusBody,
@@ -38,6 +39,7 @@ router.post("/bot/connect", async (req, res): Promise<void> => {
       return;
     }
     if (accountId === "secondary") installSecondaryCommandListener();
+    installAccountAutomationListener(accountId);
     res.json(state);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to connect";

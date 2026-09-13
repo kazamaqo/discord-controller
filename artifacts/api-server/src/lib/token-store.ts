@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
     import { getBotManager, ACCOUNT_IDS, type AccountId } from "./bot-manager";
-    import { installSecondaryCommandListener } from "./command-listener";
+    import { installAccountAutomationListener, installSecondaryCommandListener } from "./command-listener";
     import { logger } from "./logger";
 
     const TABLE_SQL = "CREATE TABLE IF NOT EXISTS discord_account_tokens (account_id TEXT PRIMARY KEY, encrypted_token TEXT NOT NULL, iv TEXT NOT NULL, auth_tag TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
@@ -59,6 +59,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
         try {
           await getBotManager(accountId).connect(token);
           if (accountId === "secondary") installSecondaryCommandListener();
+          installAccountAutomationListener(accountId);
           logger.info({ accountId }, "Restored saved Discord account");
         } catch { logger.warn({ accountId }, "Saved Discord account could not be restored"); }
       }
