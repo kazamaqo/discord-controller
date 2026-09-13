@@ -9,8 +9,10 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string used for encrypted Discord token storage
-- Required env: `TOKEN_ENCRYPTION_KEY` — stable secret used to encrypt tokens; keep this unchanged across restarts and deployments. `DASHBOARD_PASSWORD` or `SESSION_SECRET` is accepted as a fallback.
+- Optional env: `DATABASE_URL` — Postgres connection string used for encrypted Discord token storage.
+- Optional env: `TOKEN_ENCRYPTION_KEY` — stable secret used to encrypt database tokens; keep this unchanged across restarts and deployments.
+- Environment-token startup: set `DISCORD_ACCOUNT_1_TOKEN` through `DISCORD_ACCOUNT_10_TOKEN` in Railway Variables. `DISCORD_PRIMARY_TOKEN` and `DISCORD_SECONDARY_TOKEN` are accepted aliases. Keep these values private; they are read at startup and never logged.
+- Use either Postgres persistence or environment-token startup. Environment variables take precedence over database records for the same account.
 
 ## Stack
 
