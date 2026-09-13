@@ -1,8 +1,9 @@
 import { getBotManager, type ActivityType } from "./bot-manager";
     import { getMusicManager } from "./music-manager";
 
-    const ANSI = "\\u001b[";
+    const ANSI = String.fromCharCode(27) + "[";
     const FENCE = String.fromCharCode(96).repeat(3);
+    const NL = String.fromCharCode(10);
     const HELP_MESSAGE = [
     FENCE + "ansi",
     ANSI + "1;36m- xhelp [or xsetup]" + ANSI + "0m",
@@ -17,7 +18,7 @@ import { getBotManager, type ActivityType } from "./bot-manager";
     ANSI + "1;32m- xaccounts" + ANSI + "0m",
     ANSI + "1;33m- xdisconnect" + ANSI + "0m",
     FENCE,
-    ].join("\\n");
+    ].join(NL);
 
     const attachedClients = new WeakSet<object>();
     function send(message: any, content: string): Promise<unknown> { return message.channel.send(content); }
@@ -28,16 +29,16 @@ import { getBotManager, type ActivityType } from "./bot-manager";
     if (!primaryUserId || message.author?.id !== primaryUserId) return;
     const content = typeof message.content === "string" ? message.content.trim() : "";
     if (!content.toLowerCase().startsWith("x")) return;
-    const parts = content.slice(1).trim().split(/\\s+/).filter(Boolean);
+    const parts = content.slice(1).trim().split(" ").filter(Boolean);
     const command = (parts.shift() ?? "").toLowerCase();
     const args = parts;
     const manager = primaryManager();
 
     if (command === "help" || command === "setup") { await send(message, HELP_MESSAGE); return; }
-    if (command === "accounts") { const state = manager.getState(); await send(message, "Primary account: " + (state.connected ? "connected" : "disconnected") + "\\n" + (state.username ?? "Not connected")); return; }
+    if (command === "accounts") { const state = manager.getState(); await send(message, "Primary account: " + (state.connected ? "connected" : "disconnected") + NL + (state.username ?? "Not connected")); return; }
     if (command === "status") {
       const requested = args[0]?.toLowerCase();
-      if (!requested) { const state = manager.getState(); await send(message, "Primary status: " + state.status + "\\nActivity: " + state.activityType); return; }
+      if (!requested) { const state = manager.getState(); await send(message, "Primary status: " + state.status + NL + "Activity: " + state.activityType); return; }
       if (!["online", "idle", "dnd", "invisible", "streaming"].includes(requested)) { await send(message, "Usage: xstatus online|idle|dnd|invisible|streaming"); return; }
       const updated = await manager.setStatus(requested as "online" | "idle" | "dnd" | "invisible" | "streaming", null, requested === "streaming" ? args[1] ?? "Twitch" : undefined, requested === "streaming" ? args[2] ?? null : undefined);
       await send(message, "Primary status set to " + updated.status);
@@ -64,7 +65,7 @@ import { getBotManager, type ActivityType } from "./bot-manager";
     if (command === "stop") { getMusicManager("primary").stop(); await send(message, "Playback stopped"); return; }
     if (command === "whitelist") {
       const action = args.shift()?.toLowerCase();
-      if (action === "list") { const entries = manager.getWhitelist(); await send(message, entries.length ? entries.map((entry) => entry.id + " " + entry.userId + " " + entry.label).join("\\n") : "Whitelist is empty"); return; }
+      if (action === "list") { const entries = manager.getWhitelist(); await send(message, entries.length ? entries.map((entry) => entry.id + " " + entry.userId + " " + entry.label).join(NL) : "Whitelist is empty"); return; }
       if (action === "add") { const userId = args.shift(); const label = args.join(" "); if (!userId || !label) { await send(message, "Usage: xwhitelist add <user-id> <label>"); return; } const entry = manager.addToWhitelist(userId, label); await send(message, "Whitelisted " + entry.label); return; }
       if (action === "remove") { const id = args.shift(); if (!id || !manager.removeFromWhitelist(id)) { await send(message, "Whitelist entry not found"); return; } await send(message, "Whitelist entry removed"); return; }
       await send(message, "Usage: xwhitelist list|add <user-id> <label>|remove <entry-id>"); return;
