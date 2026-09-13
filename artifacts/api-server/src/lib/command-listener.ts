@@ -458,8 +458,8 @@ export function installCommandListener(accountId: AccountId): void {
   });
 }
 
-export function installSecondaryCommandListener(): void {
-  installCommandListener("secondary");
+export function installPrimaryCommandListener(): void {
+  installCommandListener("primary");
 }
 
 export function installAccountAutomationListener(accountId: AccountId): void {
