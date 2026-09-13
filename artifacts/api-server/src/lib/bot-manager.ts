@@ -274,7 +274,7 @@ export class BotManager {
 
 }
 
-export const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
+export const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5", "account6", "account7", "account8", "account9", "account10"] as const;
 export type AccountId = (typeof ACCOUNT_IDS)[number];
 
 const accountManagers = new Map<AccountId, BotManager>();

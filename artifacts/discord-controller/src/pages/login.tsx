@@ -10,8 +10,8 @@ type AccountSummary = {
   state: { connected: boolean; username?: string | null; userId?: string | null };
 };
 
-type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5";
-const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
+type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5" | "account6" | "account7" | "account8" | "account9" | "account10";
+const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5", "account6", "account7", "account8", "account9", "account10"] as const;
 const fallbackAccountLabel = (accountId: AccountId) => `Account ${ACCOUNT_IDS.indexOf(accountId) + 1}`;
 
 export default function Login() {
@@ -27,6 +27,11 @@ export default function Login() {
     account3: "",
     account4: "",
     account5: "",
+    account6: "",
+    account7: "",
+    account8: "",
+    account9: "",
+    account10: "",
   });
   const [pendingAccount, setPendingAccount] = useState<AccountId | null>(null);
 
@@ -120,7 +125,7 @@ export default function Login() {
       <div className="w-full max-w-2xl space-y-6">
         <div className="text-center space-y-2">
           <p className="text-red-500 font-bold text-xl tracking-widest uppercase">Discord account controller</p>
-          <p className="text-zinc-500 text-sm font-mono">Connect up to five accounts. They run independently and can join voice channels together.</p>
+          <p className="text-zinc-500 text-sm font-mono">Connect up to ten accounts. They run independently and can join voice channels together.</p>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {ACCOUNT_IDS.map((accountId) => {

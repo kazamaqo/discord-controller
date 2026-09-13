@@ -71,11 +71,11 @@ import { Form, FormControl, FormField, FormItem, FormMessage } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5";
-const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5"] as const;
+type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5" | "account6" | "account7" | "account8" | "account9" | "account10";
+const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5", "account6", "account7", "account8", "account9", "account10"] as const;
 
 function accountIdFromPath(path: string): AccountId | null {
-  const match = path.match(/^\/dashboard\/(primary|secondary|account3|account4|account5)\/?$/);
+  const match = path.match(/^\/dashboard\/(primary|secondary|account3|account4|account5|account6|account7|account8|account9|account10)\/?$/);
   return match ? (match[1] as AccountId) : null;
 }
 

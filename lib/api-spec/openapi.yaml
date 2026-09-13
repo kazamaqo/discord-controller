@@ -406,7 +406,7 @@ components:
           type: string
         accountId:
           type: string
-          enum: [primary, secondary, account3, account4, account5]
+          enum: [primary, secondary, account3, account4, account5, account6, account7, account8, account9, account10]
           description: Account slot to connect; defaults to primary
 
     StatusInput:
@@ -559,10 +559,10 @@ components:
         accountIds:
           type: array
           minItems: 1
-          maxItems: 5
+          maxItems: 10
           items:
             type: string
-            enum: [primary, secondary, account3, account4, account5]
+            enum: [primary, secondary, account3, account4, account5, account6, account7, account8, account9, account10]
 
     MultiVoiceJoinResponse:
       type: object
@@ -576,7 +576,7 @@ components:
             properties:
               accountId:
                 type: string
-                enum: [primary, secondary, account3, account4, account5]
+                enum: [primary, secondary, account3, account4, account5, account6, account7, account8, account9, account10]
               ok:
                 type: boolean
               error:

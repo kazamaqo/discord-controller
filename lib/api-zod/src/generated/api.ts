@@ -187,7 +187,7 @@ export const JoinVoiceBody = zod.object({
 export const MultiVoiceJoinBody = zod.object({
   "channelId": zod.string(),
   "guildId": zod.string(),
-  "accountIds": zod.array(zod.string()).min(1).max(5)
+  "accountIds": zod.array(zod.string()).min(1).max(10)
 })
 
 export const JoinVoiceResponse = zod.object({
