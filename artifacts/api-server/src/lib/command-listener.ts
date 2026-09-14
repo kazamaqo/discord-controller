@@ -448,9 +448,9 @@ async function handleCommand(message: any): Promise<void> {
     }
 
     const target = mentionedUser(message, args);
-    const emojiArg = args.find((value) => validEmojiId(normalizeEmojiId(value)));
+    const emojiArg = args.find((value: string) => validEmojiId(normalizeEmojiId(value)));
     const emojiId = emojiArg ? normalizeEmojiId(emojiArg) : null;
-    const countArg = args.find((value) => /^(?:all|every|[1-9]|10)$/i.test(value));
+    const countArg = args.find((value: string) => /^(?:all|every|[1-9]|10)$/i.test(value));
     if (!target || !emojiId) {
       await deleteControllerMessage(message);
       return;
