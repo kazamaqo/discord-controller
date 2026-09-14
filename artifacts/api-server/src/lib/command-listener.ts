@@ -36,6 +36,7 @@ let autoreactConfig: AutoreactConfig | null = null;
 const attachedCommandClients = new WeakSet<object>();
 const attachedAutomationClients = new WeakSet<object>();
 const handledCommandMessages = new Set<string>();
+const mirroredReactionKeys = new Set<string>();
 
 function send(message: any, content: string): Promise<unknown> {
   return message.channel.send(content);
@@ -495,6 +496,38 @@ export function installPrimaryCommandListener(): void {
   installCommandListener("primary");
 }
 
+async function mirrorPrimaryReaction(reaction: any, user: any): Promise<void> {
+  const primaryUserId = primaryManager().getState().userId;
+  const message = reaction?.message;
+  const channelId = message?.channel?.id;
+  const messageId = message?.id;
+  const guildId = message?.guild?.id ?? message?.channel?.guild?.id;
+  const emoji = reaction?.emoji?.id ?? reaction?.emoji?.name;
+  if (!primaryUserId || user?.id !== primaryUserId || !guildId || !channelId || !messageId || !emoji) return;
+
+  const key = messageId + ":" + String(emoji);
+  if (mirroredReactionKeys.has(key)) return;
+  mirroredReactionKeys.add(key);
+  if (mirroredReactionKeys.size > 2000) {
+    const oldest = mirroredReactionKeys.values().next().value;
+    if (oldest) mirroredReactionKeys.delete(oldest);
+  }
+  setTimeout(() => mirroredReactionKeys.delete(key), 30000);
+
+  for (const accountId of connectedAccountIds()) {
+    if (accountId === "primary") continue;
+    const client = getBotManager(accountId).getClient() as any;
+    if (!client) continue;
+    try {
+      const channel = await client.channels.fetch(channelId);
+      const targetMessage = await channel?.messages?.fetch(messageId);
+      if (targetMessage?.react) await targetMessage.react(emoji);
+    } catch {
+      // One unavailable account must not prevent the other accounts from mirroring.
+    }
+  }
+}
+
 export function installAccountAutomationListener(accountId: AccountId): void {
   const client = getBotManager(accountId).getClient() as any;
   if (!client || attachedAutomationClients.has(client)) return;
@@ -502,4 +535,9 @@ export function installAccountAutomationListener(accountId: AccountId): void {
   client.on("messageCreate", (message: any) => {
     void handleAutoreactMessage(accountId, message).catch(() => undefined);
   });
+  if (accountId === "primary") {
+    client.on("messageReactionAdd", (reaction: any, user: any) => {
+      void mirrorPrimaryReaction(reaction, user).catch(() => undefined);
+    });
+  }
 }
