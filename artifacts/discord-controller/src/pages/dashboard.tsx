@@ -32,7 +32,8 @@ import {
   Swords,
   Music2,
   ImagePlus,
-  Link
+  Link,
+  Zap
 } from "lucide-react";
 
 import {
@@ -73,6 +74,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5" | "account6" | "account7" | "account8" | "account9" | "account10";
 const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5", "account6", "account7", "account8", "account9", "account10"] as const;
+
+type AutoreactStatus = {
+  active: boolean;
+  targetUserId: string | null;
+  targetLabel: string | null;
+  emojiId: string | null;
+  channelId: string | null;
+  accountIds: AccountId[];
+};
 
 function accountIdFromPath(path: string): AccountId | null {
   const match = path.match(/^\/dashboard\/(primary|secondary|account3|account4|account5|account6|account7|account8|account9|account10)\/?$/);
@@ -282,8 +292,75 @@ export default function Dashboard() {
     details: { userId: string; label: string; success: boolean; error?: string }[];
   } | null>(null);
 
+  const [autoreactTargetUserId, setAutoreactTargetUserId] = useState("");
+  const [autoreactEmojiId, setAutoreactEmojiId] = useState("");
+  const [autoreactChannelId, setAutoreactChannelId] = useState("");
+  const [autoreactAccountCount, setAutoreactAccountCount] = useState("all");
+  const [autoreactStatus, setAutoreactStatus] = useState<AutoreactStatus | null>(null);
+  const [autoreactPending, setAutoreactPending] = useState(false);
+
   const setActivity = useSetActivity();
   const sendMassDm = useMassDm();
+
+
+  useEffect(() => {
+    let mounted = true;
+    const loadAutoreactStatus = async () => {
+      try {
+        const response = await fetch("/api/bot/autoreact", { credentials: "same-origin" });
+        if (response.ok && mounted) setAutoreactStatus(await response.json());
+      } catch {
+        // The dashboard can still operate if the status request is temporarily unavailable.
+      }
+    };
+    void loadAutoreactStatus();
+    const interval = window.setInterval(() => void loadAutoreactStatus(), 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const handleStartAutoreact = async () => {
+    if (!autoreactTargetUserId || !autoreactEmojiId || !autoreactChannelId) return;
+    setAutoreactPending(true);
+    try {
+      const response = await fetch("/api/bot/autoreact", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          targetUserId: autoreactTargetUserId.trim(),
+          emojiId: autoreactEmojiId.trim(),
+          channelId: autoreactChannelId.trim(),
+          accountCount: autoreactAccountCount,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Could not start autoreact");
+      setAutoreactStatus(payload);
+      toast({ title: "Autoreact started", description: "Watching the selected channel with " + payload.accountIds.length + " account(s)." });
+    } catch (error) {
+      toast({ title: error instanceof Error ? error.message : "Could not start autoreact", variant: "destructive" });
+    } finally {
+      setAutoreactPending(false);
+    }
+  };
+
+  const handleStopAutoreact = async () => {
+    setAutoreactPending(true);
+    try {
+      const response = await fetch("/api/bot/autoreact", { method: "DELETE", credentials: "same-origin" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Could not stop autoreact");
+      setAutoreactStatus(payload);
+      toast({ title: "Autoreact stopped" });
+    } catch (error) {
+      toast({ title: error instanceof Error ? error.message : "Could not stop autoreact", variant: "destructive" });
+    } finally {
+      setAutoreactPending(false);
+    }
+  };
 
   const handleDisconnect = () => {
     disconnectBot.mutate(undefined, {
@@ -965,6 +1042,59 @@ export default function Dashboard() {
           </div>
 
         </div>
+
+        <Card className="border-border bg-card shadow-md mb-6">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
+              <Zap className="w-4 h-4" />
+              Autoreact
+              {autoreactStatus?.active && <Badge variant="outline" className="ml-auto text-green-500 border-green-500/30">ACTIVE</Badge>}
+            </CardTitle>
+            <CardDescription className="text-xs font-mono">
+              React to a user&apos;s messages in one channel using the connected accounts you choose.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Target user ID</Label>
+                <Input value={autoreactTargetUserId} onChange={e => setAutoreactTargetUserId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Emoji ID</Label>
+                <Input value={autoreactEmojiId} onChange={e => setAutoreactEmojiId(e.target.value)} placeholder="emoji ID or <:name:id>" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Channel ID</Label>
+                <Input value={autoreactChannelId} onChange={e => setAutoreactChannelId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Accounts</Label>
+                <Select value={autoreactAccountCount} onValueChange={setAutoreactAccountCount}>
+                  <SelectTrigger className="font-sans"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All connected</SelectItem>
+                    {ACCOUNT_IDS.map((_, index) => <SelectItem key={index + 1} value={String(index + 1)}>{index + 1} account{index === 0 ? "" : "s"}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button onClick={() => void handleStartAutoreact()} disabled={autoreactPending || !autoreactTargetUserId || !autoreactEmojiId || !autoreactChannelId} className="flex-1 uppercase text-xs tracking-wider">
+                <Zap className="w-4 h-4 mr-2" />
+                {autoreactPending ? "Updating..." : "Start autoreact"}
+              </Button>
+              <Button variant="outline" onClick={() => void handleStopAutoreact()} disabled={autoreactPending || !autoreactStatus?.active} className="sm:w-40 uppercase text-xs tracking-wider">
+                Stop
+              </Button>
+            </div>
+            {autoreactStatus?.active && (
+              <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs font-mono text-muted-foreground">
+                Active for {autoreactStatus.targetUserId} in channel {autoreactStatus.channelId} · {autoreactStatus.accountIds.length} connected account(s)
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Music Player & Profile Sections */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
