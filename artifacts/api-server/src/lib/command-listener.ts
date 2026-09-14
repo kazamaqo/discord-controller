@@ -24,7 +24,7 @@ const HELP_MESSAGE = [
   FENCE,
 ].join(NL);
 
-type AutoreactConfig = {
+export type AutoreactConfig = {
   targetUserId: string;
   targetLabel: string;
   emojiId: string;
@@ -118,8 +118,37 @@ function accountLabel(accountId: AccountId): string {
   return "Account " + (ACCOUNT_IDS.indexOf(accountId) + 1);
 }
 
-function connectedAccountIds(): AccountId[] {
+export function connectedAccountIds(): AccountId[] {
   return ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
+}
+
+export function getAutoreactStatus() {
+  if (!autoreactConfig) return { active: false, targetUserId: null, targetLabel: null, emojiId: null, channelId: null, accountIds: [] as AccountId[] };
+  return { active: true, ...autoreactConfig, accountIds: [...autoreactConfig.accountIds] };
+}
+
+export function startAutoreact(options: { targetUserId: string; targetLabel?: string; emojiId: string; channelId: string; accountCount?: number | "all" }) {
+  const targetUserId = options.targetUserId.trim();
+  const channelId = options.channelId.trim();
+  const emojiId = normalizeEmojiId(options.emojiId.trim());
+  const connected = connectedAccountIds();
+  const requestedCount = options.accountCount === undefined || options.accountCount === "all" ? connected.length : Number(options.accountCount);
+
+  if (!/^\d{5,25}$/.test(targetUserId) || !/^\d{5,25}$/.test(channelId) || !validEmojiId(emojiId)) {
+    throw new Error("Invalid target, channel, or emoji");
+  }
+  if (!connected.length) throw new Error("No connected accounts are available");
+  if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length) {
+    throw new Error("Invalid account count");
+  }
+
+  const accountIds = connected.slice(0, requestedCount);
+  autoreactConfig = { targetUserId, targetLabel: options.targetLabel?.trim() || targetUserId, emojiId, accountIds, channelId };
+  return getAutoreactStatus();
+}
+
+export function stopAutoreact(): void {
+  autoreactConfig = null;
 }
 
 async function handleCommand(message: any): Promise<void> {
@@ -412,7 +441,7 @@ async function handleCommand(message: any): Promise<void> {
   if (command === "autoreact" || command === "ar" || command === "react") {
     const action = args[0]?.toLowerCase();
     if (action === "off" || action === "stop" || action === "disable") {
-      autoreactConfig = null;
+      stopAutoreact();
       await replyAndDelete(message, "Autoreact stopped");
       return;
     }
@@ -421,23 +450,23 @@ async function handleCommand(message: any): Promise<void> {
     const emojiArg = args.find((value) => validEmojiId(normalizeEmojiId(value)));
     const emojiId = emojiArg ? normalizeEmojiId(emojiArg) : null;
     const countArg = args.find((value) => /^(?:all|every|[1-9]|10)$/i.test(value));
-    const connected = connectedAccountIds();
-    const requestedCount = !countArg || /^(?:all|every)$/i.test(countArg) ? connected.length : Number(countArg);
-
-    if (!target || !emojiId || !connected.length || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length) {
+    if (!target || !emojiId) {
       await deleteControllerMessage(message);
       return;
     }
 
-    const accountIds = connected.slice(0, requestedCount);
-    autoreactConfig = {
-      targetUserId: target.id,
-      targetLabel: target.label,
-      emojiId,
-      accountIds: [...accountIds],
-      channelId: message.channel?.id ?? "",
-    };
-    await replyAndDelete(message, "Autoreact started for " + target.label + " using " + accountIds.length + " connected account(s)");
+    try {
+      const status = startAutoreact({
+        targetUserId: target.id,
+        targetLabel: target.label,
+        emojiId,
+        channelId: message.channel?.id ?? "",
+        accountCount: !countArg || /^(?:all|every)$/i.test(countArg) ? "all" : Number(countArg),
+      });
+      await replyAndDelete(message, "Autoreact started for " + target.label + " using " + status.accountIds.length + " connected account(s)");
+    } catch {
+      await deleteControllerMessage(message);
+    }
     return;
   }
   if (command === "disconnect") {
