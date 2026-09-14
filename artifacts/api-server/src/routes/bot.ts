@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { accountIdFromValue, getAccountSummaries, getBotManager, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
-import { installAccountAutomationListener, installPrimaryCommandListener } from "../lib/command-listener";
+import { getAutoreactStatus, startAutoreact, stopAutoreact, installAccountAutomationListener, installPrimaryCommandListener } from "../lib/command-listener";
 import {
   ConnectBotBody,
   SetStatusBody,
@@ -18,6 +18,31 @@ function accountIdFromRequest(req: Request, bodyAccountId?: unknown): AccountId 
 
 router.get("/bot/accounts", async (_req, res): Promise<void> => {
   res.json(getAccountSummaries());
+});
+
+
+router.get("/bot/autoreact", async (_req, res): Promise<void> => {
+  res.json(getAutoreactStatus());
+});
+
+router.post("/bot/autoreact", async (req, res): Promise<void> => {
+  const body = req.body ?? {};
+  const targetUserId = typeof body.targetUserId === "string" ? body.targetUserId : "";
+  const targetLabel = typeof body.targetLabel === "string" ? body.targetLabel : undefined;
+  const emojiId = typeof body.emojiId === "string" ? body.emojiId : "";
+  const channelId = typeof body.channelId === "string" ? body.channelId : "";
+  const accountCount = body.accountCount === undefined || body.accountCount === "all" ? "all" : Number(body.accountCount);
+  try {
+    res.json(startAutoreact({ targetUserId, targetLabel, emojiId, channelId, accountCount }));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Invalid autoreact settings";
+    res.status(400).json({ error: message });
+  }
+});
+
+router.delete("/bot/autoreact", async (_req, res): Promise<void> => {
+  stopAutoreact();
+  res.json(getAutoreactStatus());
 });
 
 router.post("/bot/connect", async (req, res): Promise<void> => {
