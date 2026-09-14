@@ -17,7 +17,7 @@ const HELP_MESSAGE = [
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
-  ANSI + "1;36m- xautoreact @user <emoji-id> <account-count>" + ANSI + "0m",
+  ANSI + "1;36m- xautoreact|xar [all|count] @user <emoji-id>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact off" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
   ANSI + "1;33m- xdisconnect" + ANSI + "0m",
@@ -73,13 +73,18 @@ function mentionedUser(message: any, args: string[]): { id: string; label: strin
     return { id: mentioned.id, label: mentioned.tag ?? mentioned.username ?? mentioned.id };
   }
 
-  const rawMention = args[0] ?? "";
+  const rawMention = args.find((arg) => /^<@!?\d+>$/.test(arg)) ?? "";
   const match = rawMention.match(/^<@!?(\d+)>$/);
   return match ? { id: match[1], label: rawMention } : null;
 }
 
 function validEmojiId(value: string): boolean {
   return /^\d{5,25}$/.test(value) || /^[\w~]+:\d{5,25}$/.test(value);
+}
+
+function normalizeEmojiId(value: string): string {
+  const customEmoji = value.match(/^<a?:([\w~]+):(\d+)>$/);
+  return customEmoji ? customEmoji[1] + ":" + customEmoji[2] : value;
 }
 
 async function handleAutoreactMessage(accountId: AccountId, message: any): Promise<void> {
@@ -404,28 +409,27 @@ async function handleCommand(message: any): Promise<void> {
     await replyAndDelete(message, lines.join(NL));
     return;
   }
-  if (command === "autoreact") {
-    if (args[0]?.toLowerCase() === "off") {
+  if (command === "autoreact" || command === "ar" || command === "react") {
+    const action = args[0]?.toLowerCase();
+    if (action === "off" || action === "stop" || action === "disable") {
       autoreactConfig = null;
       await replyAndDelete(message, "Autoreact stopped");
       return;
     }
 
     const target = mentionedUser(message, args);
-    const emojiId = args[1];
-    const requestedCount = Number(args[2]);
-    if (!target || !emojiId || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length || !validEmojiId(emojiId)) {
-      await replyAndDelete(message, "Usage: xautoreact @user <emoji-id> <account-count> (1-" + ACCOUNT_IDS.length + ")");
+    const emojiArg = args.find((value) => validEmojiId(normalizeEmojiId(value)));
+    const emojiId = emojiArg ? normalizeEmojiId(emojiArg) : null;
+    const countArg = args.find((value) => /^(?:all|every|[1-9]|10)$/i.test(value));
+    const connected = connectedAccountIds();
+    const requestedCount = !countArg || /^(?:all|every)$/i.test(countArg) ? connected.length : Number(countArg);
+
+    if (!target || !emojiId || !connected.length || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length) {
+      await deleteControllerMessage(message);
       return;
     }
 
-    const accountIds = ACCOUNT_IDS.slice(0, requestedCount);
-    const unavailable = accountIds.filter((accountId) => !getBotManager(accountId).getState().connected);
-    if (unavailable.length) {
-      await replyAndDelete(message, "Connect these accounts first: " + unavailable.map((accountId) => "Account " + (ACCOUNT_IDS.indexOf(accountId) + 1)).join(", "));
-      return;
-    }
-
+    const accountIds = connected.slice(0, requestedCount);
     autoreactConfig = {
       targetUserId: target.id,
       targetLabel: target.label,
@@ -433,7 +437,7 @@ async function handleCommand(message: any): Promise<void> {
       accountIds: [...accountIds],
       channelId: message.channel?.id ?? "",
     };
-    await replyAndDelete(message, "Autoreact started for " + target.label + " with " + emojiId + " using " + requestedCount + " account(s) in this channel");
+    await replyAndDelete(message, "Autoreact started for " + target.label + " using " + accountIds.length + " connected account(s)");
     return;
   }
   if (command === "disconnect") {
