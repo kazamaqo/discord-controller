@@ -431,7 +431,7 @@ components:
       properties:
         type:
           type: string
-          enum: [none, spotify, playing, watching, competing]
+          enum: [none, spotify, playing, watching, streaming, competing]
         songTitle:
           type: ["string", "null"]
           description: Song/track title (for Spotify) or activity name

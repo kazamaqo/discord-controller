@@ -47,6 +47,7 @@ export const ActivityInputType = {
   spotify: 'spotify',
   playing: 'playing',
   watching: 'watching',
+  streaming: 'streaming',
   competing: 'competing',
 } as const;
 

@@ -3,7 +3,7 @@ import { logger } from "./logger";
 import { v4 as uuidv4 } from "uuid";
 
 export type Status = "online" | "idle" | "dnd" | "invisible" | "streaming";
-export type ActivityType = "none" | "spotify" | "playing" | "watching" | "competing";
+export type ActivityType = "none" | "spotify" | "playing" | "watching" | "streaming" | "competing";
 
 export interface WhitelistEntry {
   id: string;
@@ -247,6 +247,13 @@ export class BotManager {
           party: { id: `spotify:${this.state.userId ?? "user"}` },
           sync_id: `spotify_track_${now}`,
           flags: 48,
+        });
+      } else if (atype === "streaming") {
+        const twitchId = this.state.activityTwitchId?.trim() || "discord";
+        activities.push({
+          name: this.state.activitySongTitle?.trim() || "Twitch",
+          type: 1,
+          url: `https://twitch.tv/${twitchId}`,
         });
       } else if (atype === "playing") {
         activities.push({ name: this.state.activitySongTitle ?? "a game", type: 0 });

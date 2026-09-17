@@ -59,7 +59,7 @@ import {
   useMassDm
 } from "@workspace/api-client-react";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -252,7 +252,7 @@ export default function Dashboard() {
       onSuccess: (res) => {
         setMassDmResult(res as any);
         setMassDmMessage("");
-        toast({ title: "Mass DM Sent", description: `Sent: ${res.sent} | Failed: ${res.failed}` });
+        toast({ title: "Mass DM Sent" });
         queryClient.invalidateQueries({ queryKey: getGetBotStateQueryKey() });
       },
       onError: () => {
@@ -347,7 +347,7 @@ export default function Dashboard() {
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || "Could not start autoreact");
       setAutoreactStatus(payload);
-      toast({ title: "Autoreact started", description: "Watching the selected channel with " + payload.accountIds.length + " account(s)." });
+      toast({ title: "Autoreact started" });
     } catch (error) {
       toast({ title: error instanceof Error ? error.message : "Could not start autoreact", variant: "destructive" });
     } finally {
@@ -384,7 +384,7 @@ export default function Dashboard() {
     setStatus.mutate({ data: { status, customText: botState?.customText } }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetBotStateQueryKey() });
-        toast({ title: "Status Updated", description: `Changed status to ${status}` });
+        toast({ title: "Status Updated" });
       }
     });
   };
@@ -466,7 +466,6 @@ export default function Dashboard() {
       const failed = payload?.failed ?? 0;
       toast({
         title: failed === 0 ? "All selected accounts joined" : "Some accounts could not join",
-        description: `${payload?.joined ?? 0} joined · ${failed} failed`,
         variant: failed === 0 ? undefined : "destructive",
       });
       queryClient.invalidateQueries();
@@ -556,10 +555,11 @@ export default function Dashboard() {
   }
 
   const statusColorMap = {
-    online: "text-green-500",
-    idle: "text-yellow-500",
-    dnd: "text-red-500",
-    invisible: "text-gray-500",
+    online: "text-foreground",
+    idle: "text-muted-foreground",
+    dnd: "text-foreground",
+    invisible: "text-muted-foreground",
+    streaming: "text-foreground",
   };
 
   const StatusIcon = {
@@ -574,10 +574,7 @@ export default function Dashboard() {
       <div className="max-w-5xl mx-auto space-y-6">
         
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-muted-foreground">Active account</p>
-            <p className="text-sm text-foreground">Switching accounts keeps presence, whitelist, profile, and voice controls separate.</p>
-          </div>
+          <p className="text-xs uppercase tracking-widest text-muted-foreground">Active account</p>
           <div className="flex items-center gap-2">
             <Select value={activeAccountId} onValueChange={(value) => switchAccount(value as AccountId)}>
               <SelectTrigger className="w-40 h-10"><SelectValue /></SelectTrigger>
@@ -601,7 +598,7 @@ export default function Dashboard() {
                 <AvatarFallback className="text-xl">{botState.username?.charAt(0) || "?"}</AvatarFallback>
               </Avatar>
               <div className={`absolute bottom-0 right-0 w-5 h-5 rounded-full border-4 border-card bg-background flex items-center justify-center`}>
-                <StatusIcon className={`w-full h-full ${statusColorMap[botState.status] || "text-gray-500"}`} fill="currentColor" />
+                <StatusIcon className={`w-full h-full ${statusColorMap[botState.status] || "text-muted-foreground"}`} fill="currentColor" />
               </div>
             </div>
             <div>
@@ -613,7 +610,7 @@ export default function Dashboard() {
                   ID: {botState.userId}
                 </Badge>
                 {botState.connected && (
-                  <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20 font-mono text-xs rounded-sm">
+                  <Badge variant="outline" className="bg-secondary text-foreground border-border font-mono text-xs rounded-sm">
                     CONNECTED
                   </Badge>
                 )}
@@ -680,7 +677,6 @@ export default function Dashboard() {
                       { id: "competing", label: "Competing", icon: Swords },
                     ].map((type) => {
                       const isActive = activityType === type.id;
-                      const isSpotify = type.id === "spotify";
                       const Icon = type.icon;
                       
                       return (
@@ -691,12 +687,10 @@ export default function Dashboard() {
                           onClick={() => setActivityType(type.id as any)}
                           className={`
                             h-8 text-xs px-3 border border-border bg-background hover:bg-secondary/50 text-foreground
-                            ${isActive && !isSpotify ? "!bg-primary !text-primary-foreground border-transparent" : ""}
-                            ${isSpotify && isActive ? "!bg-[#1db954]/20 !text-[#1db954] !border-[#1db954]" : ""}
-                            ${isSpotify && !isActive ? "hover:!text-[#1db954] hover:!border-[#1db954]/50" : ""}
+                            ${isActive ? "!bg-primary !text-primary-foreground border-transparent" : ""}
                           `}
                         >
-                          <Icon className={`w-3 h-3 mr-2 ${isSpotify && isActive ? "text-[#1db954]" : ""}`} />
+                          <Icon className="w-3 h-3 mr-2" />
                           {type.label}
                         </Button>
                       );
@@ -770,26 +764,25 @@ export default function Dashboard() {
                     </div>
 
                     {/* Live Preview */}
-                    <div className="p-4 rounded-xl border border-[#1db954]/30 bg-[#0f2318] flex items-center gap-4 relative overflow-hidden">
-                      <div className="w-16 h-16 rounded-md overflow-hidden bg-[#1db954]/10 shrink-0 border border-[#1db954]/20 flex items-center justify-center">
+                    <div className="p-4 rounded-xl border border-border bg-background flex items-center gap-4 relative overflow-hidden">
+                      <div className="w-16 h-16 rounded-md overflow-hidden bg-secondary shrink-0 border border-border flex items-center justify-center">
                         {activityImageUrl ? (
                           <img src={activityImageUrl} alt="Album Art" className="w-full h-full object-cover" />
                         ) : (
-                          <Music2 className="w-8 h-8 text-[#1db954]/50" />
+                          <Music2 className="w-8 h-8 text-muted-foreground" />
                         )}
                       </div>
                       <div className="flex-1 min-w-0 font-sans z-10">
-                        <h4 className="font-bold text-base truncate text-white leading-tight">
+                        <h4 className="font-bold text-base truncate text-foreground leading-tight">
                           {activitySongTitle || "Song Title"}
                         </h4>
-                        <p className="text-sm text-gray-300 truncate">
+                        <p className="text-sm text-muted-foreground truncate">
                           by {activityArtist || "Artist"} — {activityAlbum || "Album"}
                         </p>
-                        <p className="text-[10px] uppercase tracking-wider text-[#1db954] mt-1 font-bold">
+                        <p className="text-[10px] uppercase tracking-wider text-foreground mt-1 font-bold">
                           Listening to Spotify
                         </p>
                       </div>
-                      <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#0f2318] to-transparent pointer-events-none" />
                     </div>
                   </div>
                 )}
@@ -856,26 +849,25 @@ export default function Dashboard() {
                             )}
                           </div>
 
-                          <div className="p-4 rounded-xl border border-[#9146ff]/30 bg-[#1d1233] flex items-center gap-4 relative overflow-hidden">
-                            <div className="w-16 h-16 rounded-md overflow-hidden bg-[#9146ff]/10 shrink-0 border border-[#9146ff]/20 flex items-center justify-center">
+                          <div className="p-4 rounded-xl border border-border bg-background flex items-center gap-4 relative overflow-hidden">
+                            <div className="w-16 h-16 rounded-md overflow-hidden bg-secondary shrink-0 border border-border flex items-center justify-center">
                               {activityImageUrl ? (
                                 <img src={activityImageUrl} alt="Stream artwork" className="w-full h-full object-cover" />
                               ) : (
-                                <MonitorPlay className="w-8 h-8 text-[#9146ff]/60" />
+                                <MonitorPlay className="w-8 h-8 text-muted-foreground" />
                               )}
                             </div>
                             <div className="flex-1 min-w-0 font-sans z-10">
-                              <h4 className="font-bold text-base truncate text-white leading-tight">
+                              <h4 className="font-bold text-base truncate text-foreground leading-tight">
                                 {activityGame || "Stream title"}
                               </h4>
-                              <p className="text-sm text-gray-300 truncate">
+                              <p className="text-sm text-muted-foreground truncate">
                                 twitch.tv/{activityTwitchId || "1098046431"}
                               </p>
-                              <p className="text-[10px] uppercase tracking-wider text-[#b98cff] mt-1 font-bold">
+                              <p className="text-[10px] uppercase tracking-wider text-foreground mt-1 font-bold">
                                 Streaming on Twitch
                               </p>
                             </div>
-                            <div className="absolute right-0 top-0 bottom-0 w-32 bg-gradient-to-l from-[#1d1233] to-transparent pointer-events-none" />
                           </div>
                        </div>
                      )}
@@ -915,9 +907,6 @@ export default function Dashboard() {
                   <Users className="w-4 h-4" />
                   Trusted Whitelist
                 </CardTitle>
-                <CardDescription className="text-xs font-mono">
-                   Users who can receive controlled bulk messages.
-                </CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col gap-6">
                 
@@ -996,10 +985,6 @@ export default function Dashboard() {
                   <Send className="w-4 h-4" />
                   Mass DM
                 </CardTitle>
-                <CardDescription className="text-xs font-mono text-amber-500/80">
-                  <AlertTriangle className="w-3 h-3 inline mr-1" />
-                  This sends a DM to every user on your whitelist. Use carefully.
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <Textarea 
@@ -1022,8 +1007,8 @@ export default function Dashboard() {
                     <div className="flex justify-between items-center text-xs font-mono uppercase">
                       <span className="text-muted-foreground">Results</span>
                       <span className="text-primary">
-                        Sent: <span className="text-green-500">{massDmResult.sent}</span> | 
-                        Failed: <span className="text-red-500">{massDmResult.failed}</span> | 
+                        Sent: <span className="text-foreground">{massDmResult.sent}</span> | 
+                        Failed: <span className="text-muted-foreground">{massDmResult.failed}</span> | 
                         Total: {massDmResult.total}
                       </span>
                     </div>
@@ -1032,11 +1017,11 @@ export default function Dashboard() {
                         <div key={i} className="flex items-center justify-between text-xs p-2 rounded bg-secondary/30">
                           <span className="font-sans font-medium">{detail.label} <span className="text-muted-foreground font-mono ml-1">{detail.userId}</span></span>
                           {detail.success ? (
-                            <CheckCircle className="w-4 h-4 text-green-500" />
+                            <CheckCircle className="w-4 h-4 text-foreground" />
                           ) : (
                             <div className="flex items-center gap-2">
-                              <span className="text-red-500/80 truncate max-w-[150px]">{detail.error}</span>
-                              <XCircle className="w-4 h-4 text-red-500" />
+                              <span className="text-muted-foreground truncate max-w-[150px]">{detail.error}</span>
+                              <XCircle className="w-4 h-4 text-muted-foreground" />
                             </div>
                           )}
                         </div>
@@ -1056,11 +1041,8 @@ export default function Dashboard() {
             <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
               <Zap className="w-4 h-4" />
               Autoreact
-              {autoreactStatus?.active && <Badge variant="outline" className="ml-auto text-green-500 border-green-500/30">ACTIVE</Badge>}
+              {autoreactStatus?.active && <Badge variant="outline" className="ml-auto text-foreground border-border">ACTIVE</Badge>}
             </CardTitle>
-            <CardDescription className="text-xs font-mono">
-              React to a user&apos;s messages in one channel using the connected accounts you choose.
-            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1097,7 +1079,7 @@ export default function Dashboard() {
               </Button>
             </div>
             {autoreactStatus?.active && (
-              <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs font-mono text-muted-foreground space-y-1">
+              <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono text-muted-foreground space-y-1">
                 <div>
                   Active for {autoreactStatus.targetLabel || autoreactStatus.targetUserId} in channel {autoreactStatus.channelId} · {autoreactStatus.accountIds.length} account(s) · {autoreactStatus.emojiId}
                 </div>
@@ -1124,9 +1106,6 @@ export default function Dashboard() {
                   <Music className="w-4 h-4" />
                   Music Player
                 </CardTitle>
-                <CardDescription className="text-xs font-mono">
-                  Control audio playback in a voice channel.
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 
@@ -1186,8 +1165,8 @@ export default function Dashboard() {
                     </div>
                   </div>
                   {voiceState?.inVoice && (
-                    <div className="mt-2 text-xs text-green-500 font-mono flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <div className="mt-2 text-xs text-foreground font-mono flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-foreground animate-pulse" />
                       Connected to {voiceState.channelName || voiceState.channelId}
                     </div>
                   )}
@@ -1248,9 +1227,6 @@ export default function Dashboard() {
                   <UserCircle className="w-4 h-4" />
                   Profile Configuration
                 </CardTitle>
-                <CardDescription className="text-xs font-mono">
-                  Modify the selfbot's identity and global details.
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 
@@ -1258,7 +1234,7 @@ export default function Dashboard() {
                 <div className="space-y-4 p-4 bg-background border border-border rounded-lg">
                   <div className="flex items-start justify-between gap-4">
                     <Label className="text-xs uppercase text-muted-foreground shrink-0 mt-1">Username</Label>
-                    <div className="flex items-center gap-1 text-[10px] text-amber-500/80 uppercase font-mono">
+                    <div className="flex items-center gap-1 text-[10px] text-muted-foreground uppercase font-mono">
                       <AlertTriangle className="w-3 h-3" /> Max 2 changes/hour
                     </div>
                   </div>

@@ -117,7 +117,7 @@ router.post("/bot/activity", async (req, res): Promise<void> => {
     return;
   }
   const updated = await manager.setActivity(
-    parsed.data.type as "none" | "spotify" | "playing" | "watching" | "competing",
+    parsed.data.type as "none" | "spotify" | "playing" | "watching" | "streaming" | "competing",
     parsed.data.songTitle,
     parsed.data.artist,
     parsed.data.album,

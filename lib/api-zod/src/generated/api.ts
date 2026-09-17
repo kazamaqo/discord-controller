@@ -107,7 +107,7 @@ export const SetStatusResponse = zod.object({
  * @summary Set rich presence activity (Spotify, playing, watching, etc.)
  */
 export const SetActivityBody = zod.object({
-  "type": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
+  "type": zod.enum(['none', 'spotify', 'playing', 'watching', 'streaming', 'competing']),
   "songTitle": zod.string().nullish().describe('Song\/track title (for Spotify) or activity name'),
   "artist": zod.string().nullish().describe('Artist name (Spotify only)'),
   "album": zod.string().nullish().describe('Album name (Spotify only)'),
