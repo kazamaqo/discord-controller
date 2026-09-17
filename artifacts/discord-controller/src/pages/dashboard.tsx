@@ -82,6 +82,14 @@ type AutoreactStatus = {
   emojiId: string | null;
   channelId: string | null;
   accountIds: AccountId[];
+  stats?: {
+    matched: number;
+    reacted: number;
+    failed: number;
+    lastError: string | null;
+    lastMatchedAt: string | null;
+    lastReactedAt: string | null;
+  };
 };
 
 function accountIdFromPath(path: string): AccountId | null {
@@ -1061,8 +1069,8 @@ export default function Dashboard() {
                 <Input value={autoreactTargetUserId} onChange={e => setAutoreactTargetUserId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
-                <Label className="text-[10px] uppercase text-muted-foreground">Emoji ID</Label>
-                <Input value={autoreactEmojiId} onChange={e => setAutoreactEmojiId(e.target.value)} placeholder="emoji ID or <:name:id>" className="font-mono text-sm" />
+                <Label className="text-[10px] uppercase text-muted-foreground">Emoji</Label>
+                <Input value={autoreactEmojiId} onChange={e => setAutoreactEmojiId(e.target.value)} placeholder="😀, emoji ID, or <:name:id>" className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
                 <Label className="text-[10px] uppercase text-muted-foreground">Channel ID</Label>
@@ -1089,8 +1097,17 @@ export default function Dashboard() {
               </Button>
             </div>
             {autoreactStatus?.active && (
-              <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs font-mono text-muted-foreground">
-                Active for {autoreactStatus.targetUserId} in channel {autoreactStatus.channelId} · {autoreactStatus.accountIds.length} connected account(s)
+              <div className="rounded-lg border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs font-mono text-muted-foreground space-y-1">
+                <div>
+                  Active for {autoreactStatus.targetLabel || autoreactStatus.targetUserId} in channel {autoreactStatus.channelId} · {autoreactStatus.accountIds.length} account(s) · {autoreactStatus.emojiId}
+                </div>
+                {autoreactStatus.stats && (
+                  <div>
+                    {autoreactStatus.stats.reacted}/{autoreactStatus.stats.matched} reacted
+                    {autoreactStatus.stats.failed > 0 ? " · " + autoreactStatus.stats.failed + " failed" : ""}
+                    {autoreactStatus.stats.lastError ? " · Last error: " + autoreactStatus.stats.lastError : ""}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>

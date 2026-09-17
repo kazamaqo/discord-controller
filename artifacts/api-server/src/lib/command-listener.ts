@@ -17,7 +17,7 @@ const HELP_MESSAGE = [
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
-  ANSI + "1;36m- xautoreact|xar [all|count] @user <emoji-id>" + ANSI + "0m",
+  ANSI + "1;36m- xautoreact|xar [all|count] @user <emoji>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact off" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
   ANSI + "1;33m- xdisconnect" + ANSI + "0m",
@@ -32,11 +32,40 @@ export type AutoreactConfig = {
   channelId: string;
 };
 
+type AutoreactStats = {
+  matched: number;
+  reacted: number;
+  failed: number;
+  lastError: string | null;
+  lastMatchedAt: string | null;
+  lastReactedAt: string | null;
+};
+
 let autoreactConfig: AutoreactConfig | null = null;
 const attachedCommandClients = new WeakSet<object>();
 const attachedAutomationClients = new WeakSet<object>();
 const handledCommandMessages = new Set<string>();
 const mirroredReactionKeys = new Set<string>();
+const autoreactedMessageKeys = new Set<string>();
+const pendingAutoreactKeys = new Set<string>();
+const autoreactQueues = new Map<AccountId, Promise<void>>();
+const autoreactLastAttemptAt = new Map<AccountId, number>();
+let autoreactStats: AutoreactStats = createAutoreactStats();
+let autoreactRunId = 0;
+
+const AUTOREACT_MAX_RETRIES = 2;
+const AUTOREACT_MIN_INTERVAL_MS = 250;
+
+function createAutoreactStats(): AutoreactStats {
+  return {
+    matched: 0,
+    reacted: 0,
+    failed: 0,
+    lastError: null,
+    lastMatchedAt: null,
+    lastReactedAt: null,
+  };
+}
 
 function send(message: any, content: string): Promise<unknown> {
   return message.channel.send(content);
@@ -76,16 +105,107 @@ function mentionedUser(message: any, args: string[]): { id: string; label: strin
 
   const rawMention = args.find((arg) => /^<@!?\d+>$/.test(arg)) ?? "";
   const match = rawMention.match(/^<@!?(\d+)>$/);
-  return match ? { id: match[1], label: rawMention } : null;
+  if (match) return { id: match[1], label: rawMention };
+
+  const rawUserId = args.find((arg) => /^\d{5,25}$/.test(arg));
+  return rawUserId ? { id: rawUserId, label: rawUserId } : null;
 }
 
 function validEmojiId(value: string): boolean {
-  return /^\d{5,25}$/.test(value) || /^[\w~]+:\d{5,25}$/.test(value);
+  const normalized = value.trim();
+  if (/^\d{5,25}$/.test(normalized) || /^[\w~]+:\d{5,25}$/.test(normalized)) return true;
+
+  // Discord also accepts regular Unicode emoji, including joined sequences
+  // such as skin tones and keycaps. Reject whitespace so a sentence cannot be
+  // accidentally treated as an emoji argument.
+  return normalized.length > 0
+    && normalized.length <= 32
+    && !/\s/u.test(normalized)
+    && !/^[\d#*]+$/u.test(normalized)
+    && /\p{Emoji}/u.test(normalized);
 }
 
 function normalizeEmojiId(value: string): string {
   const customEmoji = value.match(/^<a?:([\w~]+):(\d+)>$/);
   return customEmoji ? customEmoji[1] + ":" + customEmoji[2] : value;
+}
+
+function boundedSetAdd(set: Set<string>, value: string, maxSize: number): void {
+  set.add(value);
+  if (set.size <= maxSize) return;
+  const oldest = set.values().next().value;
+  if (oldest) set.delete(oldest);
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function retryableReactionError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return true;
+  const candidate = error as { status?: unknown; statusCode?: unknown; code?: unknown };
+  const status = Number(candidate.status ?? candidate.statusCode);
+  const code = Number(candidate.code);
+  if (!Number.isFinite(status) && !Number.isFinite(code)) return true;
+  return status === 429
+    || status >= 500
+    || code === 429;
+}
+
+function reactionErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message.slice(0, 160);
+  if (typeof error === "string") return error.slice(0, 160);
+  return "Discord rejected the reaction";
+}
+
+async function reactWithRetry(accountId: AccountId, message: any, emojiId: string, key: string): Promise<void> {
+  const lastAttemptAt = autoreactLastAttemptAt.get(accountId) ?? 0;
+  const waitFor = AUTOREACT_MIN_INTERVAL_MS - (Date.now() - lastAttemptAt);
+  if (waitFor > 0) await sleep(waitFor);
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= AUTOREACT_MAX_RETRIES; attempt += 1) {
+    autoreactLastAttemptAt.set(accountId, Date.now());
+    try {
+      await message.react(emojiId);
+      boundedSetAdd(autoreactedMessageKeys, key, 5000);
+      autoreactStats.reacted += 1;
+      autoreactStats.lastReactedAt = new Date().toISOString();
+      autoreactStats.lastError = null;
+      return;
+    } catch (error: unknown) {
+      lastError = error;
+      if (attempt >= AUTOREACT_MAX_RETRIES || !retryableReactionError(error)) break;
+
+      const retryAfter = typeof error === "object" && error !== null
+        ? Number((error as { retryAfter?: unknown }).retryAfter)
+        : NaN;
+      const delay = Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(retryAfter, 10000)
+        : 500 * (attempt + 1);
+      await sleep(delay);
+    }
+  }
+
+  autoreactStats.failed += 1;
+  autoreactStats.lastError = reactionErrorMessage(lastError);
+}
+
+function queueAutoreact(accountId: AccountId, message: any, emojiId: string, key: string, runId: number): void {
+  const previous = autoreactQueues.get(accountId) ?? Promise.resolve();
+  let next: Promise<void>;
+  next = previous
+    .catch(() => undefined)
+    .then(async () => {
+      const config = autoreactConfig;
+      if (runId !== autoreactRunId || !config || !config.accountIds.includes(accountId) || config.emojiId !== emojiId) return;
+      await reactWithRetry(accountId, message, emojiId, key);
+    })
+    .finally(() => {
+      pendingAutoreactKeys.delete(key);
+      if (autoreactQueues.get(accountId) === next) autoreactQueues.delete(accountId);
+    });
+  autoreactQueues.set(accountId, next);
 }
 
 async function handleAutoreactMessage(accountId: AccountId, message: any): Promise<void> {
@@ -95,11 +215,16 @@ async function handleAutoreactMessage(accountId: AccountId, message: any): Promi
   if (message.author?.id !== config.targetUserId) return;
   if (!message.react) return;
 
-  try {
-    await message.react(config.emojiId);
-  } catch {
-    // A missing emoji, inaccessible message, or rate limit must not stop other accounts.
-  }
+  const messageId = typeof message.id === "string" ? message.id : null;
+  if (!messageId) return;
+  const runId = autoreactRunId;
+  const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId;
+  if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) return;
+
+  pendingAutoreactKeys.add(key);
+  autoreactStats.matched += 1;
+  autoreactStats.lastMatchedAt = new Date().toISOString();
+  queueAutoreact(accountId, message, config.emojiId, key, runId);
 }
 
 function extractInviteCode(value: string): string | null {
@@ -124,8 +249,18 @@ export function connectedAccountIds(): AccountId[] {
 }
 
 export function getAutoreactStatus() {
-  if (!autoreactConfig) return { active: false, targetUserId: null, targetLabel: null, emojiId: null, channelId: null, accountIds: [] as AccountId[] };
-  return { active: true, ...autoreactConfig, accountIds: [...autoreactConfig.accountIds] };
+  if (!autoreactConfig) {
+    return {
+      active: false,
+      targetUserId: null,
+      targetLabel: null,
+      emojiId: null,
+      channelId: null,
+      accountIds: [] as AccountId[],
+      stats: { ...autoreactStats },
+    };
+  }
+  return { active: true, ...autoreactConfig, accountIds: [...autoreactConfig.accountIds], stats: { ...autoreactStats } };
 }
 
 export function startAutoreact(options: { targetUserId: string; targetLabel?: string; emojiId: string; channelId: string; accountCount?: number | "all" }) {
@@ -143,7 +278,15 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
     throw new Error("Invalid account count");
   }
 
+  if (requestedCount > connected.length) {
+    throw new Error("Only " + connected.length + " connected account(s) are available");
+  }
+
   const accountIds = connected.slice(0, requestedCount);
+  autoreactRunId += 1;
+  autoreactStats = createAutoreactStats();
+  autoreactedMessageKeys.clear();
+  pendingAutoreactKeys.clear();
   autoreactConfig = { targetUserId, targetLabel: options.targetLabel?.trim() || targetUserId, emojiId, accountIds, channelId };
   return getAutoreactStatus();
 }
@@ -448,11 +591,11 @@ async function handleCommand(message: any): Promise<void> {
     }
 
     const target = mentionedUser(message, args);
-    const emojiArg = args.find((value: string) => validEmojiId(normalizeEmojiId(value)));
+    const emojiArg = args.find((value: string) => value !== target?.id && validEmojiId(normalizeEmojiId(value)));
     const emojiId = emojiArg ? normalizeEmojiId(emojiArg) : null;
     const countArg = args.find((value: string) => /^(?:all|every|[1-9]|10)$/i.test(value));
     if (!target || !emojiId) {
-      await deleteControllerMessage(message);
+      await replyAndDelete(message, "Usage: xautoreact [all|count] @user <emoji>");
       return;
     }
 
@@ -465,8 +608,9 @@ async function handleCommand(message: any): Promise<void> {
         accountCount: !countArg || /^(?:all|every)$/i.test(countArg) ? "all" : Number(countArg),
       });
       await replyAndDelete(message, "Autoreact started for " + target.label + " using " + status.accountIds.length + " connected account(s)");
-    } catch {
-      await deleteControllerMessage(message);
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : "Invalid autoreact settings";
+      await replyAndDelete(message, "Autoreact could not start: " + detail);
     }
     return;
   }
