@@ -316,14 +316,15 @@ export class BotManager {
       if (isStreamingStatus) {
         const streamTitle = this.state.statusStreamTitle?.trim() || "Twitch";
         const image = await this.resolveImage(this.state.statusImageUrl);
-        // Discord always adds a fixed "Streaming" heading to native type-1
-        // activities. Use a rich activity for the dashboard's Live status so the
-        // selected artwork is rendered and only the user's title is displayed.
+        // Native type-1 streaming is the ONLY presence Discord renders with the
+        // purple dot. Rich (type 0) activities always show green/yellow/red and
+        // a "Playing"-style heading, so purple requires streaming here. Discord
+        // itself draws the "Streaming" label and the live timer on this type;
+        // no payload field can hide them. Artwork is attached as a registered
+        // external asset so the image renders for everyone.
         activities.push({
           name: streamTitle,
-          type: 0,
-          application_id: PRESENCE_APP_ID,
-          details: streamTitle,
+          type: 1,
           url: twitchUrl(this.state.statusTwitchId),
           ...(image
             ? {
