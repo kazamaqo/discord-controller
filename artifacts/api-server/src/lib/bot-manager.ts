@@ -16,16 +16,6 @@ const PRESENCE_APP_ID = process.env["DISCORD_APPLICATION_ID"] ?? "36782798390349
 // stream. Re-broadcast the presence on a timer to keep it live for everyone.
 const PRESENCE_REFRESH_MS = Math.max(15000, Number(process.env["PRESENCE_REFRESH_MS"] ?? 30000));
 
-function twitchChannel(raw: string | null | undefined): string {
-  const cleaned = (raw ?? "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/^(www\.)?twitch\.tv\//i, "")
-    .replace(/[/?#].*$/, "")
-    .toLowerCase();
-  return /^[a-z0-9_]{3,25}$/.test(cleaned) ? cleaned : "discord";
-}
-
 function twitchUrl(raw: string | null | undefined): string {
   const cleaned = (raw ?? "")
     .trim()
@@ -123,7 +113,9 @@ export class BotManager {
           userId: user.id,
         };
         logger.info({ userId: user.id, username: user.username }, "Bot connected");
-        void this.applyPresence().catch((err) => logger.warn({ err }, "Initial presence update failed"));
+        void this.ensureActivityVisibility()
+          .then(() => this.applyPresence())
+          .catch((err) => logger.warn({ err }, "Initial presence update failed"));
         this.startPresenceRefresh();
         resolve(this.getState());
       });
@@ -169,6 +161,18 @@ export class BotManager {
     }
   }
 
+  private async ensureActivityVisibility(): Promise<void> {
+    if (!this.client?.isReady()) return;
+    // Discord accepts the gateway update locally even when this account-level
+    // privacy switch is off, but suppresses the activity for every other user.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const settings = (this.client as any).settings;
+    if (settings?.activityDisplay !== true) {
+      await settings.edit({ show_current_game: true });
+      logger.info("Enabled Discord activity visibility for other users");
+    }
+  }
+
   async disconnect(): Promise<BotState> {
     this.stopPresenceRefresh();
     if (this.client) {
@@ -203,6 +207,7 @@ export class BotManager {
     if (twitchId !== undefined) this.state.statusTwitchId = twitchId?.trim() || null;
     if (imageUrl !== undefined) this.state.statusImageUrl = imageUrl?.trim() || null;
     if (this.client?.isReady()) {
+      await this.ensureActivityVisibility();
       await this.applyPresence();
     }
     return this.getState();
@@ -315,13 +320,10 @@ export class BotManager {
         // type is the numeric 1 with a valid twitch url. A string type
         // ("STREAMING") is echoed back to this account's own client but dropped
         // for everyone else, so the purple "Live" badge was self-only.
-        const channel = twitchChannel(this.state.statusTwitchId);
         activities.push({
           name: streamTitle,
           type: 1,
           url: twitchUrl(this.state.statusTwitchId),
-          created_at: Date.now(),
-          assets: { large_image: `twitch:${channel}` },
         });
       } else if (atype === "spotify") {
         const now = Date.now();
