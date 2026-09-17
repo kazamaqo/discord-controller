@@ -14,6 +14,11 @@ const PRESENCE_APP_ID = process.env["DISCORD_APPLICATION_ID"] ?? "36782798390349
 // stream. Re-broadcast the presence on a timer to keep it live for everyone.
 const PRESENCE_REFRESH_MS = Math.max(15000, Number(process.env["PRESENCE_REFRESH_MS"] ?? 30000));
 
+function twitchUrl(channel: string | null): string {
+  const value = channel?.trim() || "1098046431";
+  return /^https?:\/\//i.test(value) ? value : `https://twitch.tv/${value.replace(/^@/, "")}`;
+}
+
 
 export interface WhitelistEntry {
   id: string;
@@ -312,6 +317,7 @@ export class BotManager {
         activities.push({
           name: streamTitle,
           type: 1,
+          url: twitchUrl(this.state.statusTwitchId),
           ...(image
             ? {
                 assets: {
