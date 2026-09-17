@@ -5,6 +5,20 @@ import { v4 as uuidv4 } from "uuid";
 export type Status = "online" | "idle" | "dnd" | "invisible" | "streaming";
 export type ActivityType = "none" | "spotify" | "playing" | "watching" | "streaming" | "competing";
 
+// Other users only see the purple "streaming" presence when the URL is a valid
+// twitch.tv channel link, so normalise whatever the dashboard sent us.
+function twitchUrl(raw: string | null | undefined): string {
+  const cleaned = (raw ?? "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^(www\.)?twitch\.tv\//i, "")
+    .replace(/[/?#].*$/, "")
+    .toLowerCase();
+  const channel = /^[a-z0-9_]{3,25}$/.test(cleaned) ? cleaned : "discord";
+  return `https://www.twitch.tv/${channel}`;
+}
+
+
 export interface WhitelistEntry {
   id: string;
   userId: string;
@@ -217,15 +231,13 @@ export class BotManager {
       const isStreamingStatus = this.state.status === "streaming";
 
       if (isStreamingStatus) {
-        const twitchId = this.state.statusTwitchId?.trim();
         const streamTitle = this.state.statusStreamTitle?.trim() || "Twitch";
         activities.push({
           name: streamTitle,
           type: 1, // STREAMING is a Discord status activity, not a regular activity option
-          url: `https://twitch.tv/${twitchId ?? "discord"}`,
-          details: "Live on Twitch",
-          state: twitchId ? `twitch.tv/${twitchId}` : "Streaming now",
+          url: twitchUrl(this.state.statusTwitchId),
         });
+
       } else if (atype === "spotify") {
         const now = Date.now();
         const trackDuration = 210000; // 3:30 default
@@ -249,12 +261,12 @@ export class BotManager {
           flags: 48,
         });
       } else if (atype === "streaming") {
-        const twitchId = this.state.activityTwitchId?.trim() || "discord";
         activities.push({
           name: this.state.activitySongTitle?.trim() || "Twitch",
           type: 1,
-          url: `https://twitch.tv/${twitchId}`,
+          url: twitchUrl(this.state.activityTwitchId),
         });
+
       } else if (atype === "playing") {
         activities.push({ name: this.state.activitySongTitle ?? "a game", type: 0 });
       } else if (atype === "watching") {

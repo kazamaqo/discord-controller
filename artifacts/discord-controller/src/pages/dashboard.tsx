@@ -900,8 +900,9 @@ export default function Dashboard() {
           </div>
 
           {/* Right Column - Whitelist */}
-          <div className="lg:col-span-7">
-            <Card className="border-border bg-card shadow-md h-full flex flex-col">
+          <div className="lg:col-span-7 flex flex-col gap-6 min-w-0">
+            <Card className="border-border bg-card shadow-md flex flex-col">
+
               <CardHeader className="pb-4">
                 <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
                   <Users className="w-4 h-4" />
@@ -979,7 +980,8 @@ export default function Dashboard() {
             </Card>
 
             {/* Mass DM Section */}
-            <Card className="border-border bg-card shadow-md mt-6">
+            <Card className="border-border bg-card shadow-md">
+
               <CardHeader className="pb-4">
                 <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
                   <Send className="w-4 h-4" />
