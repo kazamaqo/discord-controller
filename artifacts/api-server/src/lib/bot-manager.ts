@@ -313,17 +313,24 @@ export class BotManager {
 
       if (isStreamingStatus) {
         const streamTitle = this.state.statusStreamTitle?.trim() || "Twitch";
-        // A native stream must use Discord's minimal activity payload. Adding
-        // application_id/state/assets turns it into a client-only rich presence:
-        // the owner sees repeated title rows while other accounts may see nothing.
-        // The gateway only broadcasts a stream to other users when the activity
-        // type is the numeric 1 with a valid twitch url. A string type
-        // ("STREAMING") is echoed back to this account's own client but dropped
-        // for everyone else, so the purple "Live" badge was self-only.
+        const image = await this.resolveImage(this.state.statusImageUrl);
+        // Discord always adds a fixed "Streaming" heading to native type-1
+        // activities. Use a rich activity for the dashboard's Live status so the
+        // selected artwork is rendered and only the user's title is displayed.
         activities.push({
           name: streamTitle,
-          type: 1,
+          type: 0,
+          application_id: PRESENCE_APP_ID,
+          details: streamTitle,
           url: twitchUrl(this.state.statusTwitchId),
+          ...(image
+            ? {
+                assets: {
+                  large_image: image,
+                  large_text: streamTitle,
+                },
+              }
+            : {}),
         });
       } else if (atype === "spotify") {
         const now = Date.now();
