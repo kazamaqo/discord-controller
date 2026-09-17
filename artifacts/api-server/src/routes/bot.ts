@@ -106,6 +106,13 @@ router.post("/bot/status", async (req, res): Promise<void> => {
 });
 
 router.post("/bot/activity", async (req, res): Promise<void> => {
+  // Reject streaming up front on the raw body: the schema's type enum has no
+  // "streaming" member (it's a status, not an activity), so comparing against
+  // parsed.data.type would be a TS2367 no-overlap error.
+  if (req.body?.type === "streaming") {
+    res.status(400).json({ error: "Streaming is a status, not an activity. Use POST /bot/status with status=streaming." });
+    return;
+  }
   const parsed = SetActivityBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -114,10 +121,6 @@ router.post("/bot/activity", async (req, res): Promise<void> => {
   const manager = getBotManager(accountIdFromRequest(req));
   if (!manager.getState().connected) {
     res.status(400).json({ error: "Bot not connected" });
-    return;
-  }
-  if (parsed.data.type === "streaming") {
-    res.status(400).json({ error: "Streaming is a status, not an activity. Use POST /bot/status with status=streaming." });
     return;
   }
   const updated = await manager.setActivity(

@@ -189,8 +189,9 @@ export default function Dashboard() {
       setStatusStreamTitle(botState.statusStreamTitle || "");
       setStatusTwitchId(botState.statusTwitchId || "1098046431");
       if (botState.activityType) {
-        const syncedType = botState.activityType === "streaming" ? "none" : botState.activityType;
-        setActivityType(syncedType as any);
+      // BotStateActivityType has no "streaming" member (streaming is a status,
+      // not an activity), so no normalization is needed here.
+      setActivityType(botState.activityType);
         setActivitySongTitle(botState.activitySongTitle || "");
         setActivityArtist(botState.activityArtist || "");
         setActivityAlbum(botState.activityAlbum || "");
