@@ -106,15 +106,8 @@ async def apply_presence(client):
     if is_streaming_status:
         twitch_id = (bot_state.get("statusTwitchId") or "").strip()
         stream_title = (bot_state.get("statusStreamTitle") or "Twitch").strip()
-        # No stream URL: Discord only renders the "Watch" button on other
-        # users' profiles when the streaming activity carries a valid
-        # Twitch/YouTube URL. Omitting it keeps the purple "Streaming"
-        # label without the button.
-        _ = twitch_id
-        activity = discord.Activity(
-            type=discord.ActivityType.streaming,
-            name=stream_title,
-        )
+        stream_url = twitch_id if twitch_id.startswith(("http://", "https://")) else f"https://twitch.tv/{twitch_id.lstrip('@')}"
+        activity = discord.Streaming(name=stream_title, url=stream_url)
     elif atype == "spotify":
         song = bot_state["activitySongTitle"] or "Unknown Song"
         artist = bot_state["activityArtist"] or "Unknown Artist"
