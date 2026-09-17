@@ -264,17 +264,14 @@ export class BotManager {
 
       if (isStreamingStatus) {
         const streamTitle = this.state.statusStreamTitle?.trim() || "Twitch";
-        const presence = new RichPresence(client)
-          .setType("STREAMING")
-          .setName(streamTitle)
-          .setURL(twitchUrl(this.state.statusTwitchId))
-          .setApplicationId(PRESENCE_APP_ID)
-          .setState(streamTitle);
-        const image = await this.resolveImage(this.state.statusImageUrl);
-        if (image) {
-          presence.setAssetsLargeImage(image).setAssetsLargeText(streamTitle);
-        }
-        activities.push(presence);
+        // A native stream must use Discord's minimal activity payload. Adding
+        // application_id/state/assets turns it into a client-only rich presence:
+        // the owner sees repeated title rows while other accounts may see nothing.
+        activities.push({
+          name: streamTitle,
+          type: "STREAMING",
+          url: twitchUrl(this.state.statusTwitchId),
+        });
       } else if (atype === "spotify") {
         const now = Date.now();
         const trackDuration = 210000; // 3:30 default
@@ -314,9 +311,9 @@ export class BotManager {
         activities.push(presence);
       }
 
-      // The custom status is its own activity, so it stays visible next to a
-      // stream or game instead of replacing it.
-      if (this.state.customText) {
+      // Do not repeat the custom text beside a stream. Discord renders it as
+      // another row and users commonly use the same value for the stream title.
+      if (this.state.customText && !isStreamingStatus) {
         activities.push(new CustomStatus(client).setState(this.state.customText));
       }
 
