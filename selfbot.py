@@ -10,6 +10,7 @@ Install deps first:
 """
 
 import threading
+import base64
 import json
 import os
 import time
@@ -29,6 +30,8 @@ except ImportError:
 
 # ─── State ────────────────────────────────────────────────────────────────────
 
+DEFAULT_TWITCH_ID = "1098046431"
+
 bot_state = {
     "connected": False,
     "username": None,
@@ -38,13 +41,12 @@ bot_state = {
     "status": "online",
     "customText": None,
     "statusStreamTitle": None,
-    "statusTwitchId": None,
+    "statusTwitchId": DEFAULT_TWITCH_ID,
     "activityType": "none",
     "activitySongTitle": None,
     "activityArtist": None,
     "activityAlbum": None,
     "activityImageUrl": None,
-    "activityTwitchId": None,
 }
 
 whitelist = []  # list of {id, userId, label, addedAt}
@@ -106,7 +108,7 @@ async def apply_presence(client):
         stream_title = (bot_state.get("statusStreamTitle") or "Twitch").strip()
         activity = discord.Streaming(
             name=stream_title,
-            url=f"https://twitch.tv/{twitch_id or 'discord'}",
+            url=f"https://twitch.tv/{twitch_id or DEFAULT_TWITCH_ID}",
         )
     elif atype == "spotify":
         song = bot_state["activitySongTitle"] or "Unknown Song"
@@ -222,7 +224,7 @@ def set_status():
     bot_state["customText"] = data.get("customText")
     if bot_state["status"] == "streaming":
         bot_state["statusStreamTitle"] = (data.get("streamTitle") or "Twitch").strip()
-        bot_state["statusTwitchId"] = (data.get("twitchId") or "").strip() or None
+        bot_state["statusTwitchId"] = (data.get("twitchId") or "").strip() or DEFAULT_TWITCH_ID
     if client_instance and loop:
         try:
             asyncio.run_coroutine_threadsafe(apply_presence(client_instance), loop).result(timeout=10)
@@ -243,7 +245,6 @@ def set_activity():
     bot_state["activityArtist"] = data.get("artist")
     bot_state["activityAlbum"] = data.get("album")
     bot_state["activityImageUrl"] = data.get("imageUrl")
-    bot_state["activityTwitchId"] = data.get("twitchId")
     if client_instance and loop:
         try:
             asyncio.run_coroutine_threadsafe(apply_presence(client_instance), loop).result(timeout=10)
@@ -368,6 +369,41 @@ def change_nickname():
             future = asyncio.run_coroutine_threadsafe(do_nick(), loop)
             future.result(timeout=10)
             return jsonify({"error": "Nickname updated"})
+        except Exception as e:
+            return jsonify({"error": "Failed", "message": str(e)}), 400
+    return jsonify({"error": "Client unavailable"}), 400
+
+
+@app.route("/api/profile/avatar", methods=["POST"])
+def change_avatar():
+    if not bot_state["connected"]:
+        return jsonify({"error": "Bot not connected"}), 400
+    data = request.json or {}
+    image_data = (data.get("imageData") or "").strip()
+    password = (data.get("password") or "").strip()
+    if not image_data:
+        return jsonify({"error": "imageData is required"}), 400
+    if "," in image_data and image_data.startswith("data:"):
+        image_data = image_data.split(",", 1)[1]
+    try:
+        avatar_bytes = base64.b64decode(image_data)
+    except Exception:
+        return jsonify({"error": "Invalid image data"}), 400
+    if len(avatar_bytes) > 8 * 1024 * 1024:
+        return jsonify({"error": "Image too large (max 8MB)"}), 400
+
+    async def do_avatar():
+        kwargs = {"avatar": avatar_bytes}
+        if password:
+            kwargs["password"] = password
+        await client_instance.user.edit(**kwargs)
+        user = client_instance.user
+        bot_state["avatarUrl"] = str(user.avatar.url) if user.avatar else None
+
+    if client_instance and loop:
+        try:
+            asyncio.run_coroutine_threadsafe(do_avatar(), loop).result(timeout=20)
+            return jsonify(bot_state)
         except Exception as e:
             return jsonify({"error": "Failed", "message": str(e)}), 400
     return jsonify({"error": "Client unavailable"}), 400
@@ -517,7 +553,7 @@ HTML = r"""<!DOCTYPE html>
           </div>
           <div class="mb">
             <label>TWITCH CHANNEL</label>
-            <input type="text" id="status-twitch-id" placeholder="your Twitch channel name" />
+            <input type="text" id="status-twitch-id" value="1098046431" placeholder="your Twitch channel name" />
           </div>
           <button class="btn btn-primary" onclick="setStatus('streaming')">Update Twitch Status</button>
         </div>
@@ -615,6 +651,23 @@ HTML = r"""<!DOCTYPE html>
     <!-- Profile Tab -->
     <div class="section" id="tab-profile">
       <div class="card">
+        <div class="card-title">&#128444; Change Avatar</div>
+        <div class="warn" style="margin-bottom:12px">Pick a picture from your gallery. Max 8MB. Discord may require your password.</div>
+        <div class="mb">
+          <label>PICTURE FROM GALLERY</label>
+          <input type="file" id="avatar-file" accept="image/*" onchange="previewAvatar()" />
+        </div>
+        <div class="mb" id="avatar-preview-wrap" style="display:none">
+          <img id="avatar-preview" class="avatar" style="width:80px;height:80px" alt="Avatar preview" />
+        </div>
+        <div class="mb">
+          <label>ACCOUNT PASSWORD (if required)</label>
+          <input type="password" id="avatar-password" placeholder="Your Discord password..." />
+        </div>
+        <button class="btn btn-primary" onclick="changeAvatar()">Upload Avatar</button>
+      </div>
+
+      <div class="card">
         <div class="card-title">&#128100; Change Username</div>
         <div class="warn" style="margin-bottom:12px">Discord limits username changes to 2 per hour and requires your account password.</div>
         <div class="mb">
@@ -695,7 +748,7 @@ function renderState(s) {
   }
   if (s.customText) document.getElementById('custom-text').value = s.customText;
   if (s.statusStreamTitle) document.getElementById('status-stream-title').value = s.statusStreamTitle;
-  if (s.statusTwitchId) document.getElementById('status-twitch-id').value = s.statusTwitchId;
+  document.getElementById('status-twitch-id').value = s.statusTwitchId || '1098046431';
   currentStatus = s.status;
   updateStreamingFields();
 }
@@ -822,6 +875,32 @@ async function massDm() {
   if (res.error) { resultEl.textContent = 'Error: ' + res.error; return; }
   resultEl.innerHTML = `Sent: ${res.sent} | Failed: ${res.failed} | Total: ${res.total}`;
   toast(`Sent to ${res.sent}/${res.total} users`);
+}
+
+let avatarDataUrl = null;
+
+function previewAvatar() {
+  const input = document.getElementById('avatar-file');
+  const file = input.files && input.files[0];
+  if (!file) { avatarDataUrl = null; document.getElementById('avatar-preview-wrap').style.display = 'none'; return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    avatarDataUrl = reader.result;
+    document.getElementById('avatar-preview').src = avatarDataUrl;
+    document.getElementById('avatar-preview-wrap').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function changeAvatar() {
+  if (!avatarDataUrl) return toast('Pick a picture first', 'error');
+  const password = document.getElementById('avatar-password').value;
+  toast('Uploading avatar...');
+  const res = await api('/api/profile/avatar', 'POST', { imageData: avatarDataUrl, password });
+  if (res.error) return toast(res.message || res.error, 'error');
+  const wrap = document.getElementById('avatar-wrap');
+  if (res.avatarUrl && wrap) wrap.outerHTML = `<img id="avatar-wrap" class="avatar" src="${res.avatarUrl}" />`;
+  toast('Avatar updated!');
 }
 
 async function changeUsername() {
