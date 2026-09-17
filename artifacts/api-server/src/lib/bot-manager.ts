@@ -267,10 +267,15 @@ export class BotManager {
         // A native stream must use Discord's minimal activity payload. Adding
         // application_id/state/assets turns it into a client-only rich presence:
         // the owner sees repeated title rows while other accounts may see nothing.
+        // The gateway only broadcasts a stream to other users when the activity
+        // type is the numeric 1 with a valid twitch url. A string type
+        // ("STREAMING") is echoed back to this account's own client but dropped
+        // for everyone else, so the purple "Live" badge was self-only.
         activities.push({
           name: streamTitle,
-          type: "STREAMING",
+          type: 1,
           url: twitchUrl(this.state.statusTwitchId),
+          created_at: Date.now(),
         });
       } else if (atype === "spotify") {
         const now = Date.now();
