@@ -431,7 +431,7 @@ components:
       properties:
         type:
           type: string
-          enum: [none, spotify, playing, watching, streaming, competing]
+          enum: [none, spotify, playing, watching, competing]
         songTitle:
           type: ["string", "null"]
           description: Song/track title (for Spotify) or activity name
@@ -444,9 +444,6 @@ components:
         imageUrl:
           type: ["string", "null"]
           description: Album art URL or large image URL
-        twitchId:
-          type: ["string", "null"]
-          description: Twitch channel ID or username used for streaming activity URL
 
     MassDmInput:
       type: object
@@ -514,7 +511,6 @@ components:
           type: ["string", "null"]
         activityImageUrl:
           type: ["string", "null"]
-        activityTwitchId:
           type: ["string", "null"]
 
     WhitelistInput:

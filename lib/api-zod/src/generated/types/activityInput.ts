@@ -29,9 +29,4 @@ export interface ActivityInput {
      * @nullable
      */
   imageUrl?: string | null;
-  /**
-     * Twitch channel ID or username used for streaming activity URL
-     * @nullable
-     */
-  twitchId?: string | null;
 }

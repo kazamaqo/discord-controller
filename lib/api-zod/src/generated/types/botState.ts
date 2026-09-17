@@ -35,5 +35,4 @@ export interface BotState {
   /** @nullable */
   activityImageUrl?: string | null;
   /** @nullable */
-  activityTwitchId?: string | null;
 }

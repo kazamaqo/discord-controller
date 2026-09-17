@@ -3,7 +3,7 @@ import { logger } from "./logger";
 import { v4 as uuidv4 } from "uuid";
 
 export type Status = "online" | "idle" | "dnd" | "invisible" | "streaming";
-export type ActivityType = "none" | "spotify" | "playing" | "watching" | "streaming" | "competing";
+export type ActivityType = "none" | "spotify" | "playing" | "watching" | "competing";
 
 // Other users only see the purple "streaming" presence when the URL is a valid
 // twitch.tv channel link, so normalise whatever the dashboard sent us.
@@ -41,7 +41,6 @@ export interface BotState {
   activityArtist: string | null;
   activityAlbum: string | null;
   activityImageUrl: string | null;
-  activityTwitchId: string | null;
 }
 
 export class BotManager {
@@ -62,7 +61,6 @@ export class BotManager {
     activityArtist: null,
     activityAlbum: null,
     activityImageUrl: null,
-    activityTwitchId: null,
   };
   private whitelist: WhitelistEntry[] = [];
 
@@ -163,15 +161,13 @@ export class BotManager {
     songTitle?: string | null,
     artist?: string | null,
     album?: string | null,
-    imageUrl?: string | null,
-    twitchId?: string | null
+    imageUrl?: string | null
   ): Promise<BotState> {
     this.state.activityType = type;
     this.state.activitySongTitle = songTitle ?? null;
     this.state.activityArtist = artist ?? null;
     this.state.activityAlbum = album ?? null;
     this.state.activityImageUrl = imageUrl ?? null;
-    this.state.activityTwitchId = twitchId ?? null;
     if (this.client?.isReady()) {
       await this.applyPresence();
     }
@@ -260,13 +256,6 @@ export class BotManager {
           sync_id: `spotify_track_${now}`,
           flags: 48,
         });
-      } else if (atype === "streaming") {
-        activities.push({
-          name: this.state.activitySongTitle?.trim() || "Twitch",
-          type: 1,
-          url: twitchUrl(this.state.activityTwitchId),
-        });
-
       } else if (atype === "playing") {
         activities.push({ name: this.state.activitySongTitle ?? "a game", type: 0 });
       } else if (atype === "watching") {

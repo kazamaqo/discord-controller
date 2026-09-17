@@ -47,7 +47,6 @@ export const ActivityInputType = {
   spotify: 'spotify',
   playing: 'playing',
   watching: 'watching',
-  streaming: 'streaming',
   competing: 'competing',
 } as const;
 
@@ -73,11 +72,6 @@ export interface ActivityInput {
      * @nullable
      */
   imageUrl?: string | null;
-  /**
-     * Twitch channel ID or username used for streaming activity URL
-     * @nullable
-     */
-  twitchId?: string | null;
 }
 
 export interface MassDmInput {
@@ -107,6 +101,7 @@ export const BotStateStatus = {
   idle: 'idle',
   dnd: 'dnd',
   invisible: 'invisible',
+  streaming: 'streaming',
 } as const;
 
 export type BotStateActivityType = typeof BotStateActivityType[keyof typeof BotStateActivityType];
@@ -117,7 +112,6 @@ export const BotStateActivityType = {
   spotify: 'spotify',
   playing: 'playing',
   watching: 'watching',
-  streaming: 'streaming',
   competing: 'competing',
 } as const;
 
@@ -148,7 +142,6 @@ export interface BotState {
   /** @nullable */
   activityImageUrl?: string | null;
   /** @nullable */
-  activityTwitchId?: string | null;
 }
 
 export interface WhitelistInput {

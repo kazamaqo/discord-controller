@@ -28,11 +28,11 @@ import {
   XCircle,
   Gamepad2,
   Tv,
-  MonitorPlay,
   Swords,
   Music2,
   ImagePlus,
   Link,
+  Radio,
   Zap
 } from "lucide-react";
 
@@ -186,17 +186,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (botState) {
       setCustomText(botState.customText || "");
+      setStatusStreamTitle(botState.statusStreamTitle || "");
+      setStatusTwitchId(botState.statusTwitchId || "1098046431");
       if (botState.activityType) {
-        setActivityType(botState.activityType as any);
+        const syncedType = botState.activityType === "streaming" ? "none" : botState.activityType;
+        setActivityType(syncedType as any);
         setActivitySongTitle(botState.activitySongTitle || "");
         setActivityArtist(botState.activityArtist || "");
         setActivityAlbum(botState.activityAlbum || "");
         setActivityImageUrl(botState.activityImageUrl || "");
-        setActivityTwitchId(
-          botState.activityTwitchId ||
-            (botState.activityType === "streaming" ? "1098046431" : ""),
-        );
-        
+
         if (botState.activityType !== "none" && botState.activityType !== "spotify") {
            setActivityGame(botState.activitySongTitle || ""); 
         }
@@ -214,9 +213,6 @@ export default function Dashboard() {
     } else if (activityType !== "none") {
       data.songTitle = activityGame;
       data.imageUrl = activityImageUrl;
-      if (activityType === "streaming") {
-        data.twitchId = activityTwitchId || "1098046431";
-      }
     }
 
     setActivity.mutate({ data }, {
@@ -236,7 +232,6 @@ export default function Dashboard() {
     setActivityArtist("");
     setActivityAlbum("");
     setActivityImageUrl("");
-    setActivityTwitchId("");
     setActivityGame("");
     setActivity.mutate({ data: { type: "none" } }, {
       onSuccess: () => {
@@ -272,12 +267,13 @@ export default function Dashboard() {
   const [nickGuildId, setNickGuildId] = useState("");
   const [newNickname, setNewNickname] = useState("");
 
-  const [activityType, setActivityType] = useState<"none" | "spotify" | "playing" | "watching" | "streaming" | "competing">("none");
+  const [activityType, setActivityType] = useState<"none" | "spotify" | "playing" | "watching" | "competing">("none");
+  const [statusStreamTitle, setStatusStreamTitle] = useState("");
+  const [statusTwitchId, setStatusTwitchId] = useState("1098046431");
   const [activitySongTitle, setActivitySongTitle] = useState("");
   const [activityArtist, setActivityArtist] = useState("");
   const [activityAlbum, setActivityAlbum] = useState("");
   const [activityImageUrl, setActivityImageUrl] = useState("");
-  const [activityTwitchId, setActivityTwitchId] = useState("1098046431");
   const [activityGame, setActivityGame] = useState("");
   const [albumArtMode, setAlbumArtMode] = useState<"url" | "file">("url");
   const albumArtFileRef = useRef<HTMLInputElement>(null);
@@ -380,8 +376,13 @@ export default function Dashboard() {
     });
   };
 
-  const handleStatusChange = (status: "online" | "idle" | "dnd" | "invisible") => {
-    setStatus.mutate({ data: { status, customText: botState?.customText } }, {
+  const handleStatusChange = (status: "online" | "idle" | "dnd" | "invisible" | "streaming") => {
+    const data: any = { status, customText: botState?.customText };
+    if (status === "streaming") {
+      data.streamTitle = statusStreamTitle.trim() || "Twitch";
+      data.twitchId = statusTwitchId.trim() || "1098046431";
+    }
+    setStatus.mutate({ data }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetBotStateQueryKey() });
         toast({ title: "Status Updated" });
@@ -566,6 +567,7 @@ export default function Dashboard() {
     online: Circle,
     idle: Moon,
     dnd: MinusCircle,
+    streaming: Radio,
     invisible: EyeOff,
   }[botState.status] || Circle;
 
@@ -641,13 +643,48 @@ export default function Dashboard() {
                 <div className="space-y-3">
                   <Label className="text-xs uppercase text-muted-foreground">Status Setting</Label>
                   <Tabs value={botState.status} onValueChange={(v) => handleStatusChange(v as any)} className="w-full">
-                    <TabsList className="w-full grid grid-cols-4 bg-background border border-border h-11 p-1">
+                    <TabsList className="w-full grid grid-cols-5 bg-background border border-border h-11 p-1">
                       <TabsTrigger value="online" className="data-[state=active]:bg-card text-xs">ON</TabsTrigger>
                       <TabsTrigger value="idle" className="data-[state=active]:bg-card text-xs">IDL</TabsTrigger>
                       <TabsTrigger value="dnd" className="data-[state=active]:bg-card text-xs">DND</TabsTrigger>
                       <TabsTrigger value="invisible" className="data-[state=active]:bg-card text-xs">INV</TabsTrigger>
+                      <TabsTrigger value="streaming" className="data-[state=active]:bg-card text-xs">LIVE</TabsTrigger>
                     </TabsList>
                   </Tabs>
+                  {botState.status === "streaming" && (
+                    <div className="space-y-3 pt-1">
+                      <div className="space-y-2">
+                        <Label className="text-[10px] uppercase text-muted-foreground">Stream Title</Label>
+                        <Input
+                          value={statusStreamTitle}
+                          onChange={e => setStatusStreamTitle(e.target.value)}
+                          className="h-8 text-sm"
+                          placeholder="What are you streaming?"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] uppercase text-muted-foreground">Twitch Channel</Label>
+                        <Input
+                          value={statusTwitchId}
+                          onChange={e => setStatusTwitchId(e.target.value)}
+                          className="h-8 text-sm font-sans"
+                          placeholder="1098046431"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        className="w-full uppercase text-xs tracking-wider"
+                        onClick={() => handleStatusChange("streaming")}
+                        disabled={setStatus.isPending}
+                      >
+                        <Save className="w-3 h-3 mr-2" />
+                        Update Stream Status
+                      </Button>
+                      <p className="text-[10px] text-muted-foreground">
+                        Shown publicly as the purple "Streaming" presence on your profile — everyone sees it.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -673,7 +710,6 @@ export default function Dashboard() {
                       { id: "spotify", label: "Spotify", icon: Music2 },
                       { id: "playing", label: "Playing", icon: Gamepad2 },
                       { id: "watching", label: "Watching", icon: Tv },
-                      { id: "streaming", label: "Streaming", icon: MonitorPlay },
                       { id: "competing", label: "Competing", icon: Swords },
                     ].map((type) => {
                       const isActive = activityType === type.id;
@@ -789,88 +825,11 @@ export default function Dashboard() {
 
                  {activityType !== "none" && activityType !== "spotify" && (
                   <div className="space-y-3 pt-2">
-                    <Label className="text-xs uppercase text-muted-foreground">
+                     <Label className="text-xs uppercase text-muted-foreground">
                       {activityType === "playing" ? "Game Name" : 
-                       activityType === "watching" ? "Watching" : 
-                       activityType === "streaming" ? "Stream Title" : "Tournament"}
+                       activityType === "watching" ? "Watching" : "Tournament"}
                     </Label>
                     <Input value={activityGame} onChange={e => setActivityGame(e.target.value)} className="font-sans" placeholder="Enter activity detail..." />
-                     {activityType === "streaming" && (
-                        <div className="space-y-4 pt-1">
-                          <div className="space-y-2">
-                            <Label className="text-[10px] uppercase text-muted-foreground">Twitch ID</Label>
-                            <Input
-                              value={activityTwitchId}
-                              onChange={e => setActivityTwitchId(e.target.value)}
-                              className="font-sans"
-                              placeholder="channel name or Twitch ID"
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <Label className="text-[10px] uppercase text-muted-foreground">Stream Image</Label>
-                              <div className="flex gap-1">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant={albumArtMode === "url" ? "default" : "outline"}
-                                  className="h-6 text-[10px] px-2"
-                                  onClick={() => setAlbumArtMode("url")}
-                                >
-                                  <Link className="w-3 h-3 mr-1" /> URL
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant={albumArtMode === "file" ? "default" : "outline"}
-                                  className="h-6 text-[10px] px-2"
-                                  onClick={() => { setAlbumArtMode("file"); albumArtFileRef.current?.click(); }}
-                                >
-                                  <ImagePlus className="w-3 h-3 mr-1" /> Gallery
-                                </Button>
-                              </div>
-                            </div>
-                            {albumArtMode === "url" ? (
-                              <Input
-                                value={activityImageUrl}
-                                onChange={e => setActivityImageUrl(e.target.value)}
-                                className="h-8 text-sm"
-                                placeholder="https://..."
-                              />
-                            ) : (
-                              <div
-                                className="h-8 flex items-center gap-2 px-3 rounded-md border border-border bg-background cursor-pointer text-xs text-muted-foreground hover:border-primary/50 transition-colors"
-                                onClick={() => albumArtFileRef.current?.click()}
-                              >
-                                <ImagePlus className="w-3 h-3 shrink-0" />
-                                {activityImageUrl.startsWith("data:") ? "Image selected ✓" : "Tap to pick from gallery"}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="p-4 rounded-xl border border-border bg-background flex items-center gap-4 relative overflow-hidden">
-                            <div className="w-16 h-16 rounded-md overflow-hidden bg-secondary shrink-0 border border-border flex items-center justify-center">
-                              {activityImageUrl ? (
-                                <img src={activityImageUrl} alt="Stream artwork" className="w-full h-full object-cover" />
-                              ) : (
-                                <MonitorPlay className="w-8 h-8 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0 font-sans z-10">
-                              <h4 className="font-bold text-base truncate text-foreground leading-tight">
-                                {activityGame || "Stream title"}
-                              </h4>
-                              <p className="text-sm text-muted-foreground truncate">
-                                twitch.tv/{activityTwitchId || "1098046431"}
-                              </p>
-                              <p className="text-[10px] uppercase tracking-wider text-foreground mt-1 font-bold">
-                                Streaming on Twitch
-                              </p>
-                            </div>
-                          </div>
-                       </div>
-                     )}
                   </div>
                 )}
 

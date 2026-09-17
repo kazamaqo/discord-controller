@@ -116,13 +116,16 @@ router.post("/bot/activity", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bot not connected" });
     return;
   }
+  if (parsed.data.type === "streaming") {
+    res.status(400).json({ error: "Streaming is a status, not an activity. Use POST /bot/status with status=streaming." });
+    return;
+  }
   const updated = await manager.setActivity(
-    parsed.data.type as "none" | "spotify" | "playing" | "watching" | "streaming" | "competing",
+    parsed.data.type as "none" | "spotify" | "playing" | "watching" | "competing",
     parsed.data.songTitle,
     parsed.data.artist,
     parsed.data.album,
-    parsed.data.imageUrl,
-    parsed.data.twitchId
+    parsed.data.imageUrl
   );
   res.json(updated);
 });

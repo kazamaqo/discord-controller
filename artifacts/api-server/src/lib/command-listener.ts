@@ -359,19 +359,18 @@ async function handleCommand(message: any): Promise<void> {
   if (command === "activity") {
     const type = args.shift()?.toLowerCase() as ActivityType | undefined;
     if (!type || !["none", "spotify", "playing", "watching", "competing"].includes(type)) {
-      await replyAndDelete(message, "Usage: xactivity none|spotify|playing|watching|competing <name> [artist] [album] [image-url] [twitch-id]");
+      await replyAndDelete(message, "Usage: xactivity none|spotify|playing|watching|competing <name> [artist] [album] [image-url]");
       return;
     }
     const songTitle = args.shift() ?? null;
     const artist = args.shift() ?? null;
     const album = args.shift() ?? null;
     const imageUrl = args.shift() ?? null;
-    const twitchId = args.shift() ?? null;
     const updated: string[] = [];
     const failed: string[] = [];
     for (const accountId of connectedAccountIds()) {
       try {
-        const state = await getBotManager(accountId).setActivity(type, songTitle, artist, album, imageUrl, twitchId);
+        const state = await getBotManager(accountId).setActivity(type, songTitle, artist, album, imageUrl);
         updated.push(accountLabel(accountId) + " (" + state.activityType + ")");
       } catch (error: unknown) {
         failed.push(accountLabel(accountId) + " (" + (error instanceof Error ? error.message : "failed") + ")");

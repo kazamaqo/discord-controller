@@ -35,7 +35,6 @@ export const ConnectBotResponse = zod.object({
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
   "activityImageUrl": zod.string().nullish(),
-  "activityTwitchId": zod.string().nullish()
 })
 
 
@@ -54,7 +53,6 @@ export const DisconnectBotResponse = zod.object({
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
   "activityImageUrl": zod.string().nullish(),
-  "activityTwitchId": zod.string().nullish()
 })
 
 
@@ -73,7 +71,6 @@ export const GetBotStateResponse = zod.object({
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
   "activityImageUrl": zod.string().nullish(),
-  "activityTwitchId": zod.string().nullish()
 })
 
 
@@ -99,7 +96,6 @@ export const SetStatusResponse = zod.object({
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
   "activityImageUrl": zod.string().nullish(),
-  "activityTwitchId": zod.string().nullish()
 })
 
 
@@ -107,12 +103,11 @@ export const SetStatusResponse = zod.object({
  * @summary Set rich presence activity (Spotify, playing, watching, etc.)
  */
 export const SetActivityBody = zod.object({
-  "type": zod.enum(['none', 'spotify', 'playing', 'watching', 'streaming', 'competing']),
+  "type": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "songTitle": zod.string().nullish().describe('Song\/track title (for Spotify) or activity name'),
   "artist": zod.string().nullish().describe('Artist name (Spotify only)'),
   "album": zod.string().nullish().describe('Album name (Spotify only)'),
   "imageUrl": zod.string().nullish().describe('Album art URL or large image URL'),
-  "twitchId": zod.string().nullish().describe('Twitch channel ID or username used for streaming activity URL')
 })
 
 export const SetActivityResponse = zod.object({
@@ -130,7 +125,6 @@ export const SetActivityResponse = zod.object({
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
   "activityImageUrl": zod.string().nullish(),
-  "activityTwitchId": zod.string().nullish()
 })
 
 
@@ -274,7 +268,6 @@ export const ChangeUsernameResponse = zod.object({
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
   "activityImageUrl": zod.string().nullish(),
-  "activityTwitchId": zod.string().nullish()
 })
 
 
