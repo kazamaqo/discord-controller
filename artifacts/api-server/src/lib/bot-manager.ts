@@ -11,6 +11,21 @@ export type ActivityType = "none" | "spotify" | "playing" | "watching" | "compet
 // (Discord proxies them and hands back an mp:external/... path).
 const PRESENCE_APP_ID = process.env["DISCORD_APPLICATION_ID"] ?? "367827983903490050";
 
+// Discord drops a self-bot's presence whenever the gateway resumes or another
+// session (phone/desktop) takes over, which is why other people stop seeing the
+// stream. Re-broadcast the presence on a timer to keep it live for everyone.
+const PRESENCE_REFRESH_MS = Math.max(15000, Number(process.env["PRESENCE_REFRESH_MS"] ?? 30000));
+
+function twitchChannel(raw: string | null | undefined): string {
+  const cleaned = (raw ?? "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/^(www\.)?twitch\.tv\//i, "")
+    .replace(/[/?#].*$/, "")
+    .toLowerCase();
+  return /^[a-z0-9_]{3,25}$/.test(cleaned) ? cleaned : "discord";
+}
+
 function twitchUrl(raw: string | null | undefined): string {
   const cleaned = (raw ?? "")
     .trim()
@@ -51,6 +66,7 @@ export interface BotState {
 export class BotManager {
   private client: Client | null = null;
   private presenceUpdate: Promise<void> = Promise.resolve();
+  private refreshTimer: ReturnType<typeof setInterval> | null = null;
   private state: BotState = {
     connected: false,
     username: null,
@@ -108,8 +124,18 @@ export class BotManager {
         };
         logger.info({ userId: user.id, username: user.username }, "Bot connected");
         void this.applyPresence().catch((err) => logger.warn({ err }, "Initial presence update failed"));
+        this.startPresenceRefresh();
         resolve(this.getState());
       });
+
+      // A resumed gateway session starts with an empty presence.
+      const reapply = (): void => {
+        void this.applyPresence().catch((err) => logger.warn({ err }, "Presence re-apply failed"));
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.client as any).on("resumed", reapply);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.client as any).on("shardResume", reapply);
 
       this.client!.on("error", (err) => {
         clearTimeout(timeout);
@@ -126,7 +152,25 @@ export class BotManager {
     });
   }
 
+  private startPresenceRefresh(): void {
+    this.stopPresenceRefresh();
+    this.refreshTimer = setInterval(() => {
+      if (!this.client?.isReady()) return;
+      void this.applyPresence().catch((err) => logger.warn({ err }, "Presence refresh failed"));
+    }, PRESENCE_REFRESH_MS);
+    // Never hold the process open just for the refresh loop.
+    (this.refreshTimer as unknown as { unref?: () => void }).unref?.();
+  }
+
+  private stopPresenceRefresh(): void {
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+  }
+
   async disconnect(): Promise<BotState> {
+    this.stopPresenceRefresh();
     if (this.client) {
       try {
         await this.client.destroy();
@@ -271,11 +315,13 @@ export class BotManager {
         // type is the numeric 1 with a valid twitch url. A string type
         // ("STREAMING") is echoed back to this account's own client but dropped
         // for everyone else, so the purple "Live" badge was self-only.
+        const channel = twitchChannel(this.state.statusTwitchId);
         activities.push({
           name: streamTitle,
           type: 1,
           url: twitchUrl(this.state.statusTwitchId),
           created_at: Date.now(),
+          assets: { large_image: `twitch:${channel}` },
         });
       } else if (atype === "spotify") {
         const now = Date.now();
@@ -322,14 +368,30 @@ export class BotManager {
         activities.push(new CustomStatus(client).setState(this.state.customText));
       }
 
-      await Promise.resolve(
-        client.user!.setPresence({
-          // Discord has no streaming status value; streaming is represented by type 1 while online.
-          status: isStreamingStatus ? "online" : this.state.status,
-          activities,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any)
-      );
+      // setPresence() re-serialises activities through the library's Activity
+      // class, which renames snake_case gateway fields (created_at, assets,
+      // sync_id) to camelCase. Discord then ignores them and only this account's
+      // own client renders the activity, so send the raw op 3 payload instead.
+      const payload = {
+        since: 0,
+        afk: false,
+        // Discord has no streaming status value; streaming is type 1 while online.
+        status: isStreamingStatus ? "online" : this.state.status,
+        activities: activities.map((a) =>
+          typeof (a as { toJSON?: () => object }).toJSON === "function"
+            ? (a as { toJSON: () => object }).toJSON()
+            : a
+        ),
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ws = (client as any).ws;
+      if (typeof ws?.broadcast === "function") {
+        ws.broadcast({ op: 3, d: payload });
+      } else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await Promise.resolve(client.user!.setPresence(payload as any));
+      }
     };
 
     // Serialize updates so rapid status changes cannot overwrite each other out of order.
