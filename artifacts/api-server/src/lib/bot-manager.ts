@@ -5,8 +5,6 @@ import { v4 as uuidv4 } from "uuid";
 export type Status = "online" | "idle" | "dnd" | "invisible" | "streaming";
 export type ActivityType = "none" | "spotify" | "playing" | "watching" | "competing";
 
-// Other users only see the purple "streaming" presence when the URL is a valid
-// twitch.tv channel link, so normalise whatever the dashboard sent us.
 // Any real Discord application id works for uploading external presence images
 // (Discord proxies them and hands back an mp:external/... path).
 const PRESENCE_APP_ID = process.env["DISCORD_APPLICATION_ID"] ?? "367827983903490050";
@@ -15,17 +13,6 @@ const PRESENCE_APP_ID = process.env["DISCORD_APPLICATION_ID"] ?? "36782798390349
 // session (phone/desktop) takes over, which is why other people stop seeing the
 // stream. Re-broadcast the presence on a timer to keep it live for everyone.
 const PRESENCE_REFRESH_MS = Math.max(15000, Number(process.env["PRESENCE_REFRESH_MS"] ?? 30000));
-
-function twitchUrl(raw: string | null | undefined): string {
-  const cleaned = (raw ?? "")
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/^(www\.)?twitch\.tv\//i, "")
-    .replace(/[/?#].*$/, "")
-    .toLowerCase();
-  const channel = /^[a-z0-9_]{3,25}$/.test(cleaned) ? cleaned : "discord";
-  return `https://www.twitch.tv/${channel}`;
-}
 
 
 export interface WhitelistEntry {
@@ -325,7 +312,6 @@ export class BotManager {
         activities.push({
           name: streamTitle,
           type: 1,
-          url: twitchUrl(this.state.statusTwitchId),
           ...(image
             ? {
                 assets: {
