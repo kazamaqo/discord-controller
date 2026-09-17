@@ -124,6 +124,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 
+  /bot/upload-image:
+    post:
+      operationId: uploadPresenceImage
+      tags: [bot]
+      summary: Host a gallery image so Discord can use it in presence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadImageInput"
+      responses:
+        "200":
+          description: Hosted image URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadImageResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
   /bot/mass-dm:
     post:
       operationId: massDm
@@ -424,6 +449,9 @@ components:
         twitchId:
           type: ["string", "null"]
           description: Twitch channel ID or username used when status is streaming
+        imageUrl:
+          type: ["string", "null"]
+          description: Public image URL shown on the stream presence
 
     ActivityInput:
       type: object
@@ -444,6 +472,21 @@ components:
         imageUrl:
           type: ["string", "null"]
           description: Album art URL or large image URL
+
+    UploadImageInput:
+      type: object
+      required: [dataUrl]
+      properties:
+        dataUrl:
+          type: string
+          description: Base64 image data URL picked from the device gallery
+
+    UploadImageResult:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
 
     MassDmInput:
       type: object
@@ -500,6 +543,8 @@ components:
           type: ["string", "null"]
         statusTwitchId:
           type: ["string", "null"]
+        statusImageUrl:
+          type: ["string", "null"]
         activityType:
           type: string
           enum: [none, spotify, playing, watching, competing]
@@ -510,7 +555,6 @@ components:
         activityAlbum:
           type: ["string", "null"]
         activityImageUrl:
-          type: ["string", "null"]
           type: ["string", "null"]
 
     WhitelistInput:

@@ -14,8 +14,29 @@ export interface ApiError {
   message?: string;
 }
 
+/**
+ * Account slot to connect; defaults to primary
+ */
+export type BotConnectInputAccountId = typeof BotConnectInputAccountId[keyof typeof BotConnectInputAccountId];
+
+
+export const BotConnectInputAccountId = {
+  primary: 'primary',
+  secondary: 'secondary',
+  account3: 'account3',
+  account4: 'account4',
+  account5: 'account5',
+  account6: 'account6',
+  account7: 'account7',
+  account8: 'account8',
+  account9: 'account9',
+  account10: 'account10',
+} as const;
+
 export interface BotConnectInput {
   token: string;
+  /** Account slot to connect; defaults to primary */
+  accountId?: BotConnectInputAccountId;
 }
 
 export type StatusInputStatus = typeof StatusInputStatus[keyof typeof StatusInputStatus];
@@ -33,10 +54,21 @@ export interface StatusInput {
   status: StatusInputStatus;
   /** @nullable */
   customText?: string | null;
-  /** @nullable */
+  /**
+     * Twitch stream title used when status is streaming
+     * @nullable
+     */
   streamTitle?: string | null;
-  /** @nullable */
+  /**
+     * Twitch channel ID or username used when status is streaming
+     * @nullable
+     */
   twitchId?: string | null;
+  /**
+     * Public image URL shown on the stream presence
+     * @nullable
+     */
+  imageUrl?: string | null;
 }
 
 export type ActivityInputType = typeof ActivityInputType[keyof typeof ActivityInputType];
@@ -72,6 +104,15 @@ export interface ActivityInput {
      * @nullable
      */
   imageUrl?: string | null;
+}
+
+export interface UploadImageInput {
+  /** Base64 image data URL picked from the device gallery */
+  dataUrl: string;
+}
+
+export interface UploadImageResult {
+  url: string;
 }
 
 export interface MassDmInput {
@@ -132,6 +173,8 @@ export interface BotState {
   statusStreamTitle?: string | null;
   /** @nullable */
   statusTwitchId?: string | null;
+  /** @nullable */
+  statusImageUrl?: string | null;
   activityType: BotStateActivityType;
   /** @nullable */
   activitySongTitle?: string | null;
@@ -141,7 +184,6 @@ export interface BotState {
   activityAlbum?: string | null;
   /** @nullable */
   activityImageUrl?: string | null;
-  /** @nullable */
 }
 
 export interface WhitelistInput {
@@ -161,9 +203,47 @@ export interface VoiceJoinInput {
   guildId: string;
 }
 
-export interface PlayMusicInput {
-  query: string;
+export type MultiVoiceJoinInputAccountIdsItem = typeof MultiVoiceJoinInputAccountIdsItem[keyof typeof MultiVoiceJoinInputAccountIdsItem];
+
+
+export const MultiVoiceJoinInputAccountIdsItem = {
+  primary: 'primary',
+  secondary: 'secondary',
+  account3: 'account3',
+  account4: 'account4',
+  account5: 'account5',
+  account6: 'account6',
+  account7: 'account7',
+  account8: 'account8',
+  account9: 'account9',
+  account10: 'account10',
+} as const;
+
+export interface MultiVoiceJoinInput {
+  channelId: string;
+  guildId: string;
+  /**
+     * @minItems 1
+     * @maxItems 10
+     */
+  accountIds: MultiVoiceJoinInputAccountIdsItem[];
 }
+
+export type MultiVoiceJoinResponseResultsItemAccountId = typeof MultiVoiceJoinResponseResultsItemAccountId[keyof typeof MultiVoiceJoinResponseResultsItemAccountId];
+
+
+export const MultiVoiceJoinResponseResultsItemAccountId = {
+  primary: 'primary',
+  secondary: 'secondary',
+  account3: 'account3',
+  account4: 'account4',
+  account5: 'account5',
+  account6: 'account6',
+  account7: 'account7',
+  account8: 'account8',
+  account9: 'account9',
+  account10: 'account10',
+} as const;
 
 export interface VoiceState {
   inVoice: boolean;
@@ -180,6 +260,23 @@ export interface VoiceState {
   currentTrack?: string | null;
   /** @nullable */
   currentTrackTitle?: string | null;
+}
+
+export type MultiVoiceJoinResponseResultsItem = {
+  accountId: MultiVoiceJoinResponseResultsItemAccountId;
+  ok: boolean;
+  error?: string;
+  state?: VoiceState;
+};
+
+export interface MultiVoiceJoinResponse {
+  results: MultiVoiceJoinResponseResultsItem[];
+  joined: number;
+  failed: number;
+}
+
+export interface PlayMusicInput {
+  query: string;
 }
 
 export interface ChangeUsernameInput {

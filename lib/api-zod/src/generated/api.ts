@@ -17,7 +17,8 @@ export const HealthCheckResponse = zod.object({
 
 
 export const ConnectBotBody = zod.object({
-  "token": zod.string()
+  "token": zod.string(),
+  "accountId": zod.enum(['primary', 'secondary', 'account3', 'account4', 'account5', 'account6', 'account7', 'account8', 'account9', 'account10']).optional().describe('Account slot to connect; defaults to primary')
 })
 
 export const ConnectBotResponse = zod.object({
@@ -30,11 +31,12 @@ export const ConnectBotResponse = zod.object({
   "customText": zod.string().nullish(),
   "statusStreamTitle": zod.string().nullish(),
   "statusTwitchId": zod.string().nullish(),
+  "statusImageUrl": zod.string().nullish(),
   "activityType": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "activitySongTitle": zod.string().nullish(),
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
-  "activityImageUrl": zod.string().nullish(),
+  "activityImageUrl": zod.string().nullish()
 })
 
 
@@ -48,11 +50,12 @@ export const DisconnectBotResponse = zod.object({
   "customText": zod.string().nullish(),
   "statusStreamTitle": zod.string().nullish(),
   "statusTwitchId": zod.string().nullish(),
+  "statusImageUrl": zod.string().nullish(),
   "activityType": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "activitySongTitle": zod.string().nullish(),
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
-  "activityImageUrl": zod.string().nullish(),
+  "activityImageUrl": zod.string().nullish()
 })
 
 
@@ -66,19 +69,21 @@ export const GetBotStateResponse = zod.object({
   "customText": zod.string().nullish(),
   "statusStreamTitle": zod.string().nullish(),
   "statusTwitchId": zod.string().nullish(),
+  "statusImageUrl": zod.string().nullish(),
   "activityType": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "activitySongTitle": zod.string().nullish(),
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
-  "activityImageUrl": zod.string().nullish(),
+  "activityImageUrl": zod.string().nullish()
 })
 
 
 export const SetStatusBody = zod.object({
   "status": zod.enum(['online', 'idle', 'dnd', 'invisible', 'streaming']),
   "customText": zod.string().nullish(),
-  "streamTitle": zod.string().nullish(),
-  "twitchId": zod.string().nullish()
+  "streamTitle": zod.string().nullish().describe('Twitch stream title used when status is streaming'),
+  "twitchId": zod.string().nullish().describe('Twitch channel ID or username used when status is streaming'),
+  "imageUrl": zod.string().nullish().describe('Public image URL shown on the stream presence')
 })
 
 export const SetStatusResponse = zod.object({
@@ -91,11 +96,12 @@ export const SetStatusResponse = zod.object({
   "customText": zod.string().nullish(),
   "statusStreamTitle": zod.string().nullish(),
   "statusTwitchId": zod.string().nullish(),
+  "statusImageUrl": zod.string().nullish(),
   "activityType": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "activitySongTitle": zod.string().nullish(),
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
-  "activityImageUrl": zod.string().nullish(),
+  "activityImageUrl": zod.string().nullish()
 })
 
 
@@ -107,7 +113,7 @@ export const SetActivityBody = zod.object({
   "songTitle": zod.string().nullish().describe('Song\/track title (for Spotify) or activity name'),
   "artist": zod.string().nullish().describe('Artist name (Spotify only)'),
   "album": zod.string().nullish().describe('Album name (Spotify only)'),
-  "imageUrl": zod.string().nullish().describe('Album art URL or large image URL'),
+  "imageUrl": zod.string().nullish().describe('Album art URL or large image URL')
 })
 
 export const SetActivityResponse = zod.object({
@@ -120,11 +126,24 @@ export const SetActivityResponse = zod.object({
   "customText": zod.string().nullish(),
   "statusStreamTitle": zod.string().nullish(),
   "statusTwitchId": zod.string().nullish(),
+  "statusImageUrl": zod.string().nullish(),
   "activityType": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "activitySongTitle": zod.string().nullish(),
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
-  "activityImageUrl": zod.string().nullish(),
+  "activityImageUrl": zod.string().nullish()
+})
+
+
+/**
+ * @summary Host a gallery image so Discord can use it in presence
+ */
+export const UploadPresenceImageBody = zod.object({
+  "dataUrl": zod.string().describe('Base64 image data URL picked from the device gallery')
+})
+
+export const UploadPresenceImageResponse = zod.object({
+  "url": zod.string()
 })
 
 
@@ -178,12 +197,6 @@ export const JoinVoiceBody = zod.object({
   "guildId": zod.string()
 })
 
-export const MultiVoiceJoinBody = zod.object({
-  "channelId": zod.string(),
-  "guildId": zod.string(),
-  "accountIds": zod.array(zod.string()).min(1).max(10)
-})
-
 export const JoinVoiceResponse = zod.object({
   "inVoice": zod.boolean(),
   "channelId": zod.string().nullish(),
@@ -193,6 +206,40 @@ export const JoinVoiceResponse = zod.object({
   "paused": zod.boolean(),
   "currentTrack": zod.string().nullish(),
   "currentTrackTitle": zod.string().nullish()
+})
+
+
+/**
+ * @summary Join a voice channel with multiple connected accounts simultaneously
+ */
+export const joinAllVoiceBodyAccountIdsMax = 10;
+
+
+
+export const JoinAllVoiceBody = zod.object({
+  "channelId": zod.string(),
+  "guildId": zod.string(),
+  "accountIds": zod.array(zod.enum(['primary', 'secondary', 'account3', 'account4', 'account5', 'account6', 'account7', 'account8', 'account9', 'account10'])).min(1).max(joinAllVoiceBodyAccountIdsMax)
+})
+
+export const JoinAllVoiceResponse = zod.object({
+  "results": zod.array(zod.object({
+  "accountId": zod.enum(['primary', 'secondary', 'account3', 'account4', 'account5', 'account6', 'account7', 'account8', 'account9', 'account10']),
+  "ok": zod.boolean(),
+  "error": zod.string().optional(),
+  "state": zod.object({
+  "inVoice": zod.boolean(),
+  "channelId": zod.string().nullish(),
+  "channelName": zod.string().nullish(),
+  "guildId": zod.string().nullish(),
+  "guildName": zod.string().nullish(),
+  "paused": zod.boolean(),
+  "currentTrack": zod.string().nullish(),
+  "currentTrackTitle": zod.string().nullish()
+}).optional()
+})),
+  "joined": zod.number(),
+  "failed": zod.number()
 })
 
 
@@ -263,11 +310,12 @@ export const ChangeUsernameResponse = zod.object({
   "customText": zod.string().nullish(),
   "statusStreamTitle": zod.string().nullish(),
   "statusTwitchId": zod.string().nullish(),
+  "statusImageUrl": zod.string().nullish(),
   "activityType": zod.enum(['none', 'spotify', 'playing', 'watching', 'competing']),
   "activitySongTitle": zod.string().nullish(),
   "activityArtist": zod.string().nullish(),
   "activityAlbum": zod.string().nullish(),
-  "activityImageUrl": zod.string().nullish(),
+  "activityImageUrl": zod.string().nullish()
 })
 
 

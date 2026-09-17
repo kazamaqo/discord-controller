@@ -25,6 +25,8 @@ export interface BotState {
   statusStreamTitle?: string | null;
   /** @nullable */
   statusTwitchId?: string | null;
+  /** @nullable */
+  statusImageUrl?: string | null;
   activityType: BotStateActivityType;
   /** @nullable */
   activitySongTitle?: string | null;
@@ -34,5 +36,4 @@ export interface BotState {
   activityAlbum?: string | null;
   /** @nullable */
   activityImageUrl?: string | null;
-  /** @nullable */
 }

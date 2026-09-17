@@ -1,4 +1,4 @@
-import { Client, type Presence } from "discord.js-selfbot-v13";
+import { Client, RichPresence, CustomStatus, type Presence } from "discord.js-selfbot-v13";
 import { logger } from "./logger";
 import { v4 as uuidv4 } from "uuid";
 
@@ -7,6 +7,10 @@ export type ActivityType = "none" | "spotify" | "playing" | "watching" | "compet
 
 // Other users only see the purple "streaming" presence when the URL is a valid
 // twitch.tv channel link, so normalise whatever the dashboard sent us.
+// Any real Discord application id works for uploading external presence images
+// (Discord proxies them and hands back an mp:external/... path).
+const PRESENCE_APP_ID = process.env["DISCORD_APPLICATION_ID"] ?? "367827983903490050";
+
 function twitchUrl(raw: string | null | undefined): string {
   const cleaned = (raw ?? "")
     .trim()
@@ -36,6 +40,7 @@ export interface BotState {
   customText: string | null;
   statusStreamTitle: string | null;
   statusTwitchId: string | null;
+  statusImageUrl: string | null;
   activityType: ActivityType;
   activitySongTitle: string | null;
   activityArtist: string | null;
@@ -56,6 +61,7 @@ export class BotManager {
     customText: null,
     statusStreamTitle: null,
     statusTwitchId: null,
+    statusImageUrl: null,
     activityType: "none",
     activitySongTitle: null,
     activityArtist: null,
@@ -144,12 +150,14 @@ export class BotManager {
     status: Status,
     customText?: string | null,
     streamTitle?: string | null,
-    twitchId?: string | null
+    twitchId?: string | null,
+    imageUrl?: string | null
   ): Promise<BotState> {
     this.state.status = status;
     this.state.customText = customText ?? null;
     if (streamTitle !== undefined) this.state.statusStreamTitle = streamTitle?.trim() || "Twitch";
     if (twitchId !== undefined) this.state.statusTwitchId = twitchId?.trim() || null;
+    if (imageUrl !== undefined) this.state.statusImageUrl = imageUrl?.trim() || null;
     if (this.client?.isReady()) {
       await this.applyPresence();
     }
@@ -218,32 +226,66 @@ export class BotManager {
     return this.whitelist.length < before;
   }
 
+  // Discord only renders images it can fetch itself. Plain http(s) links are
+  // uploaded once via the external-assets endpoint and cached as mp:external/...
+  private externalImages = new Map<string, string>();
+
+  private async resolveImage(raw: string | null | undefined): Promise<string | null> {
+    const value = (raw ?? "").trim();
+    if (!value) return null;
+    if (/^(mp:|spotify:|twitch:|youtube:)/.test(value)) return value;
+    if (/^[0-9]{17,19}$/.test(value)) return value;
+    if (/^https?:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(value)) return value;
+    if (!/^https?:\/\//.test(value)) return null; // data: URLs can't be fetched by Discord
+
+    const cached = this.externalImages.get(value);
+    if (cached) return cached;
+    try {
+      const [asset] = await RichPresence.getExternal(this.client as Client, PRESENCE_APP_ID, value);
+      const path = (asset as { external_asset_path?: string } | undefined)?.external_asset_path;
+      if (!path) return null;
+      const resolved = `mp:${path}`;
+      this.externalImages.set(value, resolved);
+      return resolved;
+    } catch (err) {
+      logger.warn({ err, value }, "Could not upload presence image to Discord");
+      return null;
+    }
+  }
+
   private applyPresence(): Promise<void> {
     const update = async (): Promise<void> => {
       if (!this.client?.isReady()) return;
 
+      const client = this.client;
       const activities: object[] = [];
       const atype = this.state.activityType;
       const isStreamingStatus = this.state.status === "streaming";
 
       if (isStreamingStatus) {
         const streamTitle = this.state.statusStreamTitle?.trim() || "Twitch";
-        activities.push({
-          name: streamTitle,
-          type: 1, // STREAMING is a Discord status activity, not a regular activity option
-          url: twitchUrl(this.state.statusTwitchId),
-        });
-
+        const presence = new RichPresence(client)
+          .setType("STREAMING")
+          .setName(streamTitle)
+          .setURL(twitchUrl(this.state.statusTwitchId))
+          .setApplicationId(PRESENCE_APP_ID)
+          .setState(streamTitle);
+        const image = await this.resolveImage(this.state.statusImageUrl);
+        if (image) {
+          presence.setAssetsLargeImage(image).setAssetsLargeText(streamTitle);
+        }
+        activities.push(presence);
       } else if (atype === "spotify") {
         const now = Date.now();
         const trackDuration = 210000; // 3:30 default
+        const image = (await this.resolveImage(this.state.activityImageUrl)) ?? "spotify:ab67616d0000b273";
         activities.push({
           name: "Spotify",
           type: 2, // LISTENING
           details: this.state.activitySongTitle ?? "Unknown Track",
           state: this.state.activityArtist ?? "Unknown Artist",
           assets: {
-            large_image: this.state.activityImageUrl ?? "spotify:ab67616d0000b273",
+            large_image: image,
             large_text: this.state.activityAlbum ?? "Unknown Album",
             small_image: "spotify:ab6775700000ee85d",
             small_text: "Spotify",
@@ -256,21 +298,34 @@ export class BotManager {
           sync_id: `spotify_track_${now}`,
           flags: 48,
         });
-      } else if (atype === "playing") {
-        activities.push({ name: this.state.activitySongTitle ?? "a game", type: 0 });
-      } else if (atype === "watching") {
-        activities.push({ name: this.state.activitySongTitle ?? "something", type: 3 });
-      } else if (atype === "competing") {
-        activities.push({ name: this.state.activitySongTitle ?? "a tournament", type: 5 });
-      } else if (this.state.customText) {
-        activities.push({ name: this.state.customText, type: 4 });
+      } else if (atype === "playing" || atype === "watching" || atype === "competing") {
+        const typeId = atype === "playing" ? "PLAYING" : atype === "watching" ? "WATCHING" : "COMPETING";
+        const name =
+          this.state.activitySongTitle ??
+          (atype === "playing" ? "a game" : atype === "watching" ? "something" : "a tournament");
+        const presence = new RichPresence(client)
+          .setType(typeId)
+          .setName(name)
+          .setApplicationId(PRESENCE_APP_ID);
+        const image = await this.resolveImage(this.state.activityImageUrl);
+        if (image) {
+          presence.setAssetsLargeImage(image).setAssetsLargeText(name);
+        }
+        activities.push(presence);
+      }
+
+      // The custom status is its own activity, so it stays visible next to a
+      // stream or game instead of replacing it.
+      if (this.state.customText) {
+        activities.push(new CustomStatus(client).setState(this.state.customText));
       }
 
       await Promise.resolve(
-        this.client.user!.setPresence({
+        client.user!.setPresence({
           // Discord has no streaming status value; streaming is represented by type 1 while online.
           status: isStreamingStatus ? "online" : this.state.status,
           activities,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any)
       );
     };

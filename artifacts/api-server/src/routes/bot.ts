@@ -9,6 +9,7 @@ import {
   MassDmBody,
 } from "@workspace/api-zod";
 import { saveAccountToken } from "../lib/token-store";
+import { storeDataUrl } from "../lib/image-store";
 
 const router: IRouter = Router();
 
@@ -100,7 +101,8 @@ router.post("/bot/status", async (req, res): Promise<void> => {
     parsed.data.status as "online" | "idle" | "dnd" | "invisible" | "streaming",
     parsed.data.customText,
     parsed.data.streamTitle,
-    parsed.data.twitchId
+    parsed.data.twitchId,
+    parsed.data.imageUrl
   );
   res.json(updated);
 });
@@ -131,6 +133,26 @@ router.post("/bot/activity", async (req, res): Promise<void> => {
     parsed.data.imageUrl
   );
   res.json(updated);
+});
+
+// Gallery picks arrive as base64 data URLs; Discord cannot read those, so the
+// image is hosted here and the public link is what gets attached to presence.
+router.post("/bot/upload-image", async (req, res): Promise<void> => {
+  const dataUrl = typeof req.body?.dataUrl === "string" ? req.body.dataUrl : "";
+  if (!dataUrl) {
+    res.status(400).json({ error: "dataUrl is required" });
+    return;
+  }
+  try {
+    const { id } = storeDataUrl(dataUrl);
+    const base =
+      process.env["PUBLIC_BASE_URL"]?.replace(/\/$/, "") ??
+      `${req.get("x-forwarded-proto") ?? req.protocol}://${req.get("host")}`;
+    res.json({ url: `${base}/uploads/${id}` });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Invalid image";
+    res.status(400).json({ error: message });
+  }
 });
 
 router.post("/bot/mass-dm", async (req, res): Promise<void> => {

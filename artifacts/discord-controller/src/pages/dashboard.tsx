@@ -56,6 +56,7 @@ import {
   useGetGuilds,
   getGetGuildsQueryKey,
   useSetActivity,
+  useUploadPresenceImage,
   useMassDm
 } from "@workspace/api-client-react";
 
@@ -188,6 +189,7 @@ export default function Dashboard() {
       setCustomText(botState.customText || "");
       setStatusStreamTitle(botState.statusStreamTitle || "");
       setStatusTwitchId(botState.statusTwitchId || "1098046431");
+      setStreamImageUrl(botState.statusImageUrl || "");
       if (botState.activityType) {
       // BotStateActivityType has no "streaming" member (streaming is a status,
       // not an activity), so no normalization is needed here.
@@ -279,14 +281,49 @@ export default function Dashboard() {
   const [albumArtMode, setAlbumArtMode] = useState<"url" | "file">("url");
   const albumArtFileRef = useRef<HTMLInputElement>(null);
 
-  const handleAlbumArtFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [streamImageUrl, setStreamImageUrl] = useState("");
+  const [uploadingImage, setUploadingImage] = useState<"album" | "stream" | null>(null);
+  const streamImageFileRef = useRef<HTMLInputElement>(null);
+  const uploadPresenceImage = useUploadPresenceImage();
+
+  const readAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(ev.target?.result as string);
+      reader.onerror = () => reject(new Error("Could not read that image"));
+      reader.readAsDataURL(file);
+    });
+
+  // Discord can only display images it can download itself, so gallery picks are
+  // hosted by the server first and the public link is what gets sent.
+  const uploadGalleryImage = async (file: File, slot: "album" | "stream"): Promise<string | null> => {
+    setUploadingImage(slot);
+    try {
+      const dataUrl = await readAsDataUrl(file);
+      const result = await uploadPresenceImage.mutateAsync({ data: { dataUrl } });
+      return result.url;
+    } catch {
+      toast({ title: "Image upload failed", variant: "destructive" });
+      return null;
+    } finally {
+      setUploadingImage(null);
+    }
+  };
+
+  const handleAlbumArtFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setActivityImageUrl(ev.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    const url = await uploadGalleryImage(file, "album");
+    if (url) setActivityImageUrl(url);
+    e.target.value = "";
+  };
+
+  const handleStreamImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = await uploadGalleryImage(file, "stream");
+    if (url) setStreamImageUrl(url);
+    e.target.value = "";
   };
 
   const [massDmMessage, setMassDmMessage] = useState("");
@@ -382,6 +419,7 @@ export default function Dashboard() {
     if (status === "streaming") {
       data.streamTitle = statusStreamTitle.trim() || "Twitch";
       data.twitchId = statusTwitchId.trim() || "1098046431";
+      data.imageUrl = streamImageUrl.trim() || null;
     }
     setStatus.mutate({ data }, {
       onSuccess: () => {
@@ -672,6 +710,46 @@ export default function Dashboard() {
                           placeholder="1098046431"
                         />
                       </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] uppercase text-muted-foreground">Stream Image</Label>
+                        <input
+                          ref={streamImageFileRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleStreamImageFile}
+                        />
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-12 rounded-md overflow-hidden bg-secondary shrink-0 border border-border flex items-center justify-center">
+                            {streamImageUrl ? (
+                              <img src={streamImageUrl} alt="Stream" className="w-full h-full object-cover" />
+                            ) : (
+                              <Radio className="w-5 h-5 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div
+                            className="flex-1 h-8 flex items-center gap-2 px-3 rounded-md border border-border bg-background cursor-pointer text-xs text-muted-foreground hover:border-primary/50 transition-colors"
+                            onClick={() => streamImageFileRef.current?.click()}
+                          >
+                            <ImagePlus className="w-3 h-3 shrink-0" />
+                            {uploadingImage === "stream"
+                              ? "Uploading..."
+                              : streamImageUrl
+                                ? "Image selected ✓ — tap to change"
+                                : "Tap to pick from gallery"}
+                          </div>
+                          {streamImageUrl && (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8 shrink-0"
+                              onClick={() => setStreamImageUrl("")}
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
                       <Button
                         size="sm"
                         className="w-full uppercase text-xs tracking-wider"
@@ -794,7 +872,11 @@ export default function Dashboard() {
                             onClick={() => albumArtFileRef.current?.click()}
                           >
                             <ImagePlus className="w-3 h-3 shrink-0" />
-                            {activityImageUrl.startsWith("data:") ? "Image selected ✓" : "Tap to pick from gallery"}
+                            {uploadingImage === "album"
+                              ? "Uploading..."
+                              : activityImageUrl
+                                ? "Image selected ✓ — tap to change"
+                                : "Tap to pick from gallery"}
                           </div>
                         )}
                       </div>

@@ -5,7 +5,10 @@
  * Discord selfbot controller API
  * OpenAPI spec version: 0.1.0
  */
+import type { BotConnectInputAccountId } from './botConnectInputAccountId';
 
 export interface BotConnectInput {
   token: string;
+  /** Account slot to connect; defaults to primary */
+  accountId?: BotConnectInputAccountId;
 }

@@ -11,8 +11,19 @@ export interface StatusInput {
   status: StatusInputStatus;
   /** @nullable */
   customText?: string | null;
-  /** @nullable */
+  /**
+     * Twitch stream title used when status is streaming
+     * @nullable
+     */
   streamTitle?: string | null;
-  /** @nullable */
+  /**
+     * Twitch channel ID or username used when status is streaming
+     * @nullable
+     */
   twitchId?: string | null;
+  /**
+     * Public image URL shown on the stream presence
+     * @nullable
+     */
+  imageUrl?: string | null;
 }

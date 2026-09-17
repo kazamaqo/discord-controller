@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
 import { accountIdFromValue, getBotManager, isAccountId, type AccountId } from "../lib/bot-manager";
 import { getMusicManager } from "../lib/music-manager";
-import { JoinVoiceBody, MultiVoiceJoinBody, PlayMusicBody } from "@workspace/api-zod";
+import { JoinVoiceBody, JoinAllVoiceBody, PlayMusicBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
@@ -41,7 +41,7 @@ router.post("/voice/join", async (req, res): Promise<void> => {
 });
 
 router.post("/voice/join-all", async (req, res): Promise<void> => {
-  const parsed = MultiVoiceJoinBody.safeParse(req.body);
+  const parsed = JoinAllVoiceBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Select at least one valid account and provide a guild and channel" });
     return;

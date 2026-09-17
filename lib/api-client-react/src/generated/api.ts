@@ -30,8 +30,12 @@ import type {
   HealthStatus,
   MassDmInput,
   MassDmResult,
+  MultiVoiceJoinInput,
+  MultiVoiceJoinResponse,
   PlayMusicInput,
   StatusInput,
+  UploadImageInput,
+  UploadImageResult,
   VoiceJoinInput,
   VoiceState,
   WhitelistEntry,
@@ -463,6 +467,77 @@ export const useSetActivity = <TError = ErrorType<ApiError>,
       return useMutation(getSetActivityMutationOptions(options));
     }
 
+export const getUploadPresenceImageUrl = () => {
+
+
+
+
+  return `/api/bot/upload-image`
+}
+
+/**
+ * @summary Host a gallery image so Discord can use it in presence
+ */
+export const uploadPresenceImage = async (uploadImageInput: UploadImageInput, options?: RequestInit): Promise<UploadImageResult> => {
+
+  return customFetch<UploadImageResult>(getUploadPresenceImageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      uploadImageInput,)
+  }
+);}
+
+
+
+
+export const getUploadPresenceImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadPresenceImage>>, TError,{data: BodyType<UploadImageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadPresenceImage>>, TError,{data: BodyType<UploadImageInput>}, TContext> => {
+
+const mutationKey = ['uploadPresenceImage'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadPresenceImage>>, {data: BodyType<UploadImageInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  uploadPresenceImage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadPresenceImageMutationResult = NonNullable<Awaited<ReturnType<typeof uploadPresenceImage>>>
+    export type UploadPresenceImageMutationBody = BodyType<UploadImageInput>
+    export type UploadPresenceImageMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Host a gallery image so Discord can use it in presence
+ */
+export const useUploadPresenceImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadPresenceImage>>, TError,{data: BodyType<UploadImageInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadPresenceImage>>,
+        TError,
+        {data: BodyType<UploadImageInput>},
+        TContext
+      > => {
+      return useMutation(getUploadPresenceImageMutationOptions(options));
+    }
+
 export const getMassDmUrl = () => {
 
 
@@ -797,6 +872,77 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getJoinVoiceMutationOptions(options));
+    }
+
+export const getJoinAllVoiceUrl = () => {
+
+
+
+
+  return `/api/voice/join-all`
+}
+
+/**
+ * @summary Join a voice channel with multiple connected accounts simultaneously
+ */
+export const joinAllVoice = async (multiVoiceJoinInput: MultiVoiceJoinInput, options?: RequestInit): Promise<MultiVoiceJoinResponse> => {
+
+  return customFetch<MultiVoiceJoinResponse>(getJoinAllVoiceUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      multiVoiceJoinInput,)
+  }
+);}
+
+
+
+
+export const getJoinAllVoiceMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinAllVoice>>, TError,{data: BodyType<MultiVoiceJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof joinAllVoice>>, TError,{data: BodyType<MultiVoiceJoinInput>}, TContext> => {
+
+const mutationKey = ['joinAllVoice'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof joinAllVoice>>, {data: BodyType<MultiVoiceJoinInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  joinAllVoice(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type JoinAllVoiceMutationResult = NonNullable<Awaited<ReturnType<typeof joinAllVoice>>>
+    export type JoinAllVoiceMutationBody = BodyType<MultiVoiceJoinInput>
+    export type JoinAllVoiceMutationError = ErrorType<ApiError>
+
+    /**
+ * @summary Join a voice channel with multiple connected accounts simultaneously
+ */
+export const useJoinAllVoice = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof joinAllVoice>>, TError,{data: BodyType<MultiVoiceJoinInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof joinAllVoice>>,
+        TError,
+        {data: BodyType<MultiVoiceJoinInput>},
+        TContext
+      > => {
+      return useMutation(getJoinAllVoiceMutationOptions(options));
     }
 
 export const getPlayMusicUrl = () => {
