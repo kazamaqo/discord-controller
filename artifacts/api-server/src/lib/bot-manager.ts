@@ -284,7 +284,9 @@ export class BotManager {
     if (!value) return null;
     if (/^(mp:|spotify:|twitch:|youtube:)/.test(value)) return value;
     if (/^[0-9]{17,19}$/.test(value)) return value;
-    if (/^https?:\/\/(cdn\.discordapp\.com|media\.discordapp\.net)\//.test(value)) return value;
+    // Every HTTP image, including Discord CDN links, must first be registered
+    // as an external RPC asset. Sending a bare URL in assets.large_image makes
+    // Discord render the broken question-mark placeholder.
     if (!/^https?:\/\//.test(value)) return null; // data: URLs can't be fetched by Discord
 
     const cached = this.externalImages.get(value);
