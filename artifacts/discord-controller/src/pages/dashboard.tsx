@@ -97,6 +97,7 @@ type WelcomerStatus = {
   enabled: boolean;
   channelId: string;
   watchUserIds: string[];
+  triggerWord: string;
   delayMs: number;
   templates: string[];
   defaultTemplates: string[];
@@ -107,6 +108,7 @@ type WelcomerStatus = {
     lastMessage: string | null;
     lastWelcomedAt: string | null;
     lastError: string | null;
+    lastSkipReason: string | null;
   };
 };
 
@@ -360,7 +362,7 @@ export default function Dashboard() {
 
   const [welcomerStatus, setWelcomerStatus] = useState<WelcomerStatus | null>(null);
   const [welcomerChannelId, setWelcomerChannelId] = useState("");
-  const [welcomerWatchIds, setWelcomerWatchIds] = useState("");
+  const [welcomerTrigger, setWelcomerTrigger] = useState("welcome");
   const [welcomerDelay, setWelcomerDelay] = useState("1500");
   const [welcomerTemplates, setWelcomerTemplates] = useState("");
   const [welcomerPending, setWelcomerPending] = useState(false);
@@ -399,7 +401,7 @@ export default function Dashboard() {
         setWelcomerLoaded(previous => {
           if (!previous) {
             setWelcomerChannelId(payload.channelId ?? "");
-            setWelcomerWatchIds((payload.watchUserIds ?? []).join(", "));
+            setWelcomerTrigger(payload.triggerWord ?? "welcome");
             setWelcomerDelay(String(payload.delayMs ?? 1500));
             setWelcomerTemplates((payload.templates ?? payload.defaultTemplates ?? []).join("\n"));
           }
@@ -427,7 +429,7 @@ export default function Dashboard() {
         body: JSON.stringify({
           enabled,
           channelId: welcomerChannelId.trim(),
-          watchUserIds: welcomerWatchIds,
+          triggerWord: welcomerTrigger,
           delayMs: Number(welcomerDelay) || 0,
           templates: welcomerTemplates,
         }),
@@ -1246,12 +1248,12 @@ export default function Dashboard() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="space-y-2">
-                <Label className="text-[10px] uppercase text-muted-foreground">Welcome channel ID</Label>
+                <Label className="text-[10px] uppercase text-muted-foreground">Welcome channel ID (blank = any channel)</Label>
                 <Input value={welcomerChannelId} onChange={e => setWelcomerChannelId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
-                <Label className="text-[10px] uppercase text-muted-foreground">Welcome bot IDs (optional)</Label>
-                <Input value={welcomerWatchIds} onChange={e => setWelcomerWatchIds(e.target.value)} placeholder="Mimu bot ID, comma separated" className="font-mono text-sm" />
+                <Label className="text-[10px] uppercase text-muted-foreground">Trigger word</Label>
+                <Input value={welcomerTrigger} onChange={e => setWelcomerTrigger(e.target.value)} placeholder="welcome" className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
                 <Label className="text-[10px] uppercase text-muted-foreground">Delay (ms)</Label>
@@ -1263,7 +1265,7 @@ export default function Dashboard() {
               <Textarea value={welcomerTemplates} onChange={e => setWelcomerTemplates(e.target.value)} rows={10} className="font-mono text-sm" placeholder="yo welcome {user} glad u joined, enjoy ur stay here" />
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
-              <Button onClick={() => void saveWelcomer(true)} disabled={welcomerPending || !welcomerLoaded || !welcomerChannelId.trim() || !welcomerTemplates.trim()} className="flex-1 uppercase text-xs tracking-wider">
+              <Button onClick={() => void saveWelcomer(true)} disabled={welcomerPending || !welcomerLoaded || !welcomerTemplates.trim()} className="flex-1 uppercase text-xs tracking-wider">
                 <Zap className="w-4 h-4 mr-2" />
                 {welcomerPending ? "Saving..." : "Save & enable"}
               </Button>
@@ -1279,6 +1281,7 @@ export default function Dashboard() {
                 <div>{welcomerStatus.stats.welcomed} welcomed{welcomerStatus.stats.failed > 0 ? " · " + welcomerStatus.stats.failed + " failed" : ""}</div>
                 {welcomerStatus.stats.lastMessage && <div>Last: {welcomerStatus.stats.lastMessage}</div>}
                 {welcomerStatus.stats.lastError && <div>Last error: {welcomerStatus.stats.lastError}</div>}
+                {welcomerStatus.stats.lastSkipReason && <div>Last skip: {welcomerStatus.stats.lastSkipReason}</div>}
               </div>
             )}
           </CardContent>
