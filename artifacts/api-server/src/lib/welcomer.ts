@@ -4,9 +4,10 @@ import { logger } from "./logger";
 // Auto welcomer for the PRIMARY account only.
 //
 // A welcome bot (Mimu and friends) posts a message such as
-// "welcome, <@1406356035836448778>" whenever someone joins. Self-bots do not
-// reliably receive guildMemberAdd, so the new member's id is copied straight
-// out of that bot message and used in a randomly picked reply.
+// "welcome, <@1406356035836448778>" whenever someone joins, sometimes with the
+// same mention inside an embed. Self-bots do not reliably receive
+// guildMemberAdd, so the new member's id is copied straight out of that message
+// and reused in a randomly picked reply.
 
 export const DEFAULT_WELCOME_TEMPLATES = [
   "yo welcome {user} glad u joined, enjoy ur stay here",
@@ -23,10 +24,12 @@ export const DEFAULT_WELCOME_TEMPLATES = [
 
 export type WelcomerConfig = {
   enabled: boolean;
+  /** Empty = watch every channel the primary account can see. */
   channelId: string;
-  /** Optional: only react to these author ids (the welcome bot). Empty = any bot/user but the primary itself. */
+  /** Empty = react to any account posting a welcome line (no bot ID needed). */
   watchUserIds: string[];
-  /** Delay before replying, so it does not look instant. */
+  /** Word that must appear in the message for it to count as a join. */
+  triggerWord: string;
   delayMs: number;
   templates: string[];
 };
@@ -38,12 +41,14 @@ type WelcomerStats = {
   lastMessage: string | null;
   lastWelcomedAt: string | null;
   lastError: string | null;
+  lastSkipReason: string | null;
 };
 
 let config: WelcomerConfig = {
   enabled: false,
   channelId: "",
   watchUserIds: [],
+  triggerWord: "welcome",
   delayMs: 1500,
   templates: [...DEFAULT_WELCOME_TEMPLATES],
 };
@@ -60,6 +65,7 @@ function createStats(): WelcomerStats {
     lastMessage: null,
     lastWelcomedAt: null,
     lastError: null,
+    lastSkipReason: null,
   };
 }
 
@@ -88,6 +94,7 @@ export function setWelcomerConfig(input: {
   enabled?: unknown;
   channelId?: unknown;
   watchUserIds?: unknown;
+  triggerWord?: unknown;
   delayMs?: unknown;
   templates?: unknown;
 }) {
@@ -110,6 +117,12 @@ export function setWelcomerConfig(input: {
     next.watchUserIds = ids;
   }
 
+  if (input.triggerWord !== undefined) {
+    const triggerWord = String(input.triggerWord ?? "").trim().toLowerCase();
+    if (triggerWord.length > 40) throw new Error("Trigger word is too long");
+    next.triggerWord = triggerWord;
+  }
+
   if (input.delayMs !== undefined) {
     const delay = Number(input.delayMs);
     if (!Number.isFinite(delay) || delay < 0 || delay > 60000) throw new Error("Delay must be 0-60000 ms");
@@ -128,9 +141,8 @@ export function setWelcomerConfig(input: {
     next.enabled = input.enabled === true || input.enabled === "true";
   }
 
-  if (next.enabled && !next.channelId) throw new Error("A welcome channel ID is required");
-
   config = next;
+  void saveWelcomerConfig().catch(() => undefined);
   return getWelcomerStatus();
 }
 
@@ -138,25 +150,84 @@ export function resetWelcomerStats(): void {
   stats = createStats();
 }
 
-/** Pull the first user mention out of the message content or any embed. */
-function extractMentionedUserId(message: any): string | null {
+// ---------------------------------------------------------------------------
+// Persistence: the dashboard settings survive an api-server restart.
+// ---------------------------------------------------------------------------
+
+const TABLE_SQL = "CREATE TABLE IF NOT EXISTS discord_welcomer_config (id INT PRIMARY KEY, config JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
+let poolPromise: Promise<any> | null = null;
+
+async function getPool(): Promise<any> {
+  if (!process.env.DATABASE_URL) return null;
+  if (!poolPromise) poolPromise = import("@workspace/db").then(({ pool }) => pool);
+  return poolPromise;
+}
+
+async function saveWelcomerConfig(): Promise<void> {
+  try {
+    const pool = await getPool();
+    if (!pool) return;
+    await pool.query(TABLE_SQL);
+    await pool.query(
+      "INSERT INTO discord_welcomer_config (id, config) VALUES (1, $1) ON CONFLICT (id) DO UPDATE SET config = EXCLUDED.config, updated_at = NOW()",
+      [JSON.stringify(config)],
+    );
+  } catch (error) {
+    logger.warn({ err: error }, "Welcomer settings could not be saved");
+  }
+}
+
+export async function restoreWelcomerConfig(): Promise<void> {
+  try {
+    const pool = await getPool();
+    if (!pool) return;
+    await pool.query(TABLE_SQL);
+    const result = await pool.query("SELECT config FROM discord_welcomer_config WHERE id = 1");
+    const saved = result.rows?.[0]?.config;
+    if (!saved) return;
+    const parsed = typeof saved === "string" ? JSON.parse(saved) : saved;
+    config = {
+      enabled: parsed.enabled === true,
+      channelId: typeof parsed.channelId === "string" ? parsed.channelId : "",
+      watchUserIds: Array.isArray(parsed.watchUserIds) ? parsed.watchUserIds.map(String) : [],
+      triggerWord: typeof parsed.triggerWord === "string" ? parsed.triggerWord : "welcome",
+      delayMs: Number.isFinite(Number(parsed.delayMs)) ? Number(parsed.delayMs) : 1500,
+      templates: Array.isArray(parsed.templates) && parsed.templates.length
+        ? parsed.templates.map(String)
+        : [...DEFAULT_WELCOME_TEMPLATES],
+    };
+    logger.info({ enabled: config.enabled }, "Welcomer settings restored");
+  } catch (error) {
+    logger.warn({ err: error }, "Welcomer settings could not be restored");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Detection
+// ---------------------------------------------------------------------------
+
+function messageTexts(message: any): string[] {
   const texts: string[] = [];
   if (typeof message?.content === "string") texts.push(message.content);
   for (const embed of (message?.embeds ?? []) as any[]) {
-    for (const value of [embed?.description, embed?.title, embed?.author?.name, embed?.footer?.text]) {
+    const data = embed?.data ?? embed;
+    for (const value of [data?.description, data?.title, data?.author?.name, data?.footer?.text]) {
       if (typeof value === "string") texts.push(value);
     }
-    for (const field of (embed?.fields ?? []) as any[]) {
+    for (const field of (data?.fields ?? []) as any[]) {
       if (typeof field?.name === "string") texts.push(field.name);
       if (typeof field?.value === "string") texts.push(field.value);
     }
   }
+  return texts;
+}
 
-  for (const text of texts) {
+/** Copy the first user id out of "welcome, <@123...>" in the content or an embed. */
+function extractMentionedUserId(message: any): string | null {
+  for (const text of messageTexts(message)) {
     const match = text.match(/<@!?(\d{5,25})>/);
     if (match) return match[1];
   }
-
   const mentioned = message?.mentions?.users?.first?.();
   return typeof mentioned?.id === "string" ? mentioned.id : null;
 }
@@ -175,25 +246,34 @@ function renderTemplate(template: string, userId: string): string {
 }
 
 export async function handleWelcomeMessage(message: any): Promise<void> {
-  if (!config.enabled || !config.channelId) return;
-  if (message?.channel?.id !== config.channelId) return;
+  if (!config.enabled) return;
+  if (config.channelId && message?.channel?.id !== config.channelId) return;
 
   const primaryUserId = getBotManager("primary").getState().userId;
   const authorId = message?.author?.id;
-  if (!primaryUserId || !authorId || authorId === primaryUserId) return;
+  if (!primaryUserId || !authorId) return;
+  // Never react to the welcomer's own replies (that would loop).
+  if (authorId === primaryUserId) return;
   if (config.watchUserIds.length && !config.watchUserIds.includes(authorId)) return;
 
-  const messageId = typeof message?.id === "string" ? message.id : null;
-  if (!messageId || handledMessageIds.has(messageId)) return;
+  const texts = messageTexts(message).join(" ").toLowerCase();
+  if (config.triggerWord && !texts.includes(config.triggerWord)) return;
 
   const userId = extractMentionedUserId(message);
-  if (!userId || userId === primaryUserId) return;
+  if (!userId) {
+    stats.lastSkipReason = "No user mention found in the welcome message";
+    return;
+  }
 
-  // Welcome bots often post a plain line plus an embed for the same member.
+  const messageId = typeof message?.id === "string" ? message.id : null;
+  if (messageId && handledMessageIds.has(messageId)) return;
+
+  // Welcome bots often post a plain line and then edit in an embed for the
+  // same member; one welcome per member per minute is enough.
   const lastAt = recentlyWelcomed.get(userId) ?? 0;
   if (Date.now() - lastAt < 60000) return;
 
-  boundedAdd(handledMessageIds, messageId, 2000);
+  if (messageId) boundedAdd(handledMessageIds, messageId, 2000);
   recentlyWelcomed.set(userId, Date.now());
   if (recentlyWelcomed.size > 500) {
     const oldest = recentlyWelcomed.keys().next().value;
@@ -209,6 +289,7 @@ export async function handleWelcomeMessage(message: any): Promise<void> {
     stats.lastMessage = content;
     stats.lastWelcomedAt = new Date().toISOString();
     stats.lastError = null;
+    stats.lastSkipReason = null;
   } catch (error: unknown) {
     recentlyWelcomed.delete(userId);
     stats.failed += 1;
