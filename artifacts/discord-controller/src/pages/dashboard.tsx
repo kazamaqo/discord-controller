@@ -93,6 +93,23 @@ type AutoreactStatus = {
   };
 };
 
+type WelcomerStatus = {
+  enabled: boolean;
+  channelId: string;
+  watchUserIds: string[];
+  delayMs: number;
+  templates: string[];
+  defaultTemplates: string[];
+  stats?: {
+    welcomed: number;
+    failed: number;
+    lastUserId: string | null;
+    lastMessage: string | null;
+    lastWelcomedAt: string | null;
+    lastError: string | null;
+  };
+};
+
 function accountIdFromPath(path: string): AccountId | null {
   const match = path.match(/^\/dashboard\/(primary|secondary|account3|account4|account5|account6|account7|account8|account9|account10)\/?$/);
   return match ? (match[1] as AccountId) : null;
@@ -341,6 +358,14 @@ export default function Dashboard() {
   const [autoreactStatus, setAutoreactStatus] = useState<AutoreactStatus | null>(null);
   const [autoreactPending, setAutoreactPending] = useState(false);
 
+  const [welcomerStatus, setWelcomerStatus] = useState<WelcomerStatus | null>(null);
+  const [welcomerChannelId, setWelcomerChannelId] = useState("");
+  const [welcomerWatchIds, setWelcomerWatchIds] = useState("");
+  const [welcomerDelay, setWelcomerDelay] = useState("1500");
+  const [welcomerTemplates, setWelcomerTemplates] = useState("");
+  const [welcomerPending, setWelcomerPending] = useState(false);
+  const [welcomerLoaded, setWelcomerLoaded] = useState(false);
+
   const setActivity = useSetActivity();
   const sendMassDm = useMassDm();
 
@@ -362,6 +387,76 @@ export default function Dashboard() {
       window.clearInterval(interval);
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadWelcomer = async () => {
+      try {
+        const response = await fetch("/api/bot/welcomer", { credentials: "same-origin" });
+        if (!response.ok || !mounted) return;
+        const payload: WelcomerStatus = await response.json();
+        setWelcomerStatus(payload);
+        setWelcomerLoaded(previous => {
+          if (!previous) {
+            setWelcomerChannelId(payload.channelId ?? "");
+            setWelcomerWatchIds((payload.watchUserIds ?? []).join(", "));
+            setWelcomerDelay(String(payload.delayMs ?? 1500));
+            setWelcomerTemplates((payload.templates ?? payload.defaultTemplates ?? []).join("\n"));
+          }
+          return true;
+        });
+      } catch {
+        // The dashboard keeps working if the welcomer status is briefly unavailable.
+      }
+    };
+    void loadWelcomer();
+    const interval = window.setInterval(() => void loadWelcomer(), 5000);
+    return () => {
+      mounted = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const saveWelcomer = async (enabled: boolean) => {
+    setWelcomerPending(true);
+    try {
+      const response = await fetch("/api/bot/welcomer", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enabled,
+          channelId: welcomerChannelId.trim(),
+          watchUserIds: welcomerWatchIds,
+          delayMs: Number(welcomerDelay) || 0,
+          templates: welcomerTemplates,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Could not save the welcomer");
+      setWelcomerStatus(payload);
+      toast({ title: enabled ? "Welcomer enabled" : "Welcomer saved" });
+    } catch (error) {
+      toast({ title: error instanceof Error ? error.message : "Could not save the welcomer", variant: "destructive" });
+    } finally {
+      setWelcomerPending(false);
+    }
+  };
+
+  const handleStopWelcomer = async () => {
+    setWelcomerPending(true);
+    try {
+      const response = await fetch("/api/bot/welcomer", { method: "DELETE", credentials: "same-origin" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Could not stop the welcomer");
+      setWelcomerStatus(payload);
+      toast({ title: "Welcomer disabled" });
+    } catch (error) {
+      toast({ title: error instanceof Error ? error.message : "Could not stop the welcomer", variant: "destructive" });
+    } finally {
+      setWelcomerPending(false);
+    }
+  };
 
   const handleStartAutoreact = async () => {
     if (!autoreactTargetUserId || !autoreactEmojiId || !autoreactChannelId) return;
@@ -1138,6 +1233,57 @@ export default function Dashboard() {
             )}
           </CardContent>
         </Card>
+
+        {activeAccountId === "primary" && (
+        <Card className="border-border bg-card shadow-md mb-6">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
+              <Zap className="w-4 h-4" />
+              Auto welcomer (primary only)
+              {welcomerStatus?.enabled && <Badge variant="outline" className="ml-auto text-foreground border-border">ACTIVE</Badge>}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Welcome channel ID</Label>
+                <Input value={welcomerChannelId} onChange={e => setWelcomerChannelId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Welcome bot IDs (optional)</Label>
+                <Input value={welcomerWatchIds} onChange={e => setWelcomerWatchIds(e.target.value)} placeholder="Mimu bot ID, comma separated" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Delay (ms)</Label>
+                <Input value={welcomerDelay} onChange={e => setWelcomerDelay(e.target.value)} placeholder="1500" className="font-mono text-sm" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] uppercase text-muted-foreground">Messages (one per line, {"{user}"} becomes the new member)</Label>
+              <Textarea value={welcomerTemplates} onChange={e => setWelcomerTemplates(e.target.value)} rows={10} className="font-mono text-sm" placeholder="yo welcome {user} glad u joined, enjoy ur stay here" />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button onClick={() => void saveWelcomer(true)} disabled={welcomerPending || !welcomerLoaded || !welcomerChannelId.trim() || !welcomerTemplates.trim()} className="flex-1 uppercase text-xs tracking-wider">
+                <Zap className="w-4 h-4 mr-2" />
+                {welcomerPending ? "Saving..." : "Save & enable"}
+              </Button>
+              <Button variant="outline" onClick={() => setWelcomerTemplates((welcomerStatus?.defaultTemplates ?? []).join("\n"))} disabled={welcomerPending} className="sm:w-40 uppercase text-xs tracking-wider">
+                Reset list
+              </Button>
+              <Button variant="outline" onClick={() => void handleStopWelcomer()} disabled={welcomerPending || !welcomerStatus?.enabled} className="sm:w-40 uppercase text-xs tracking-wider">
+                Disable
+              </Button>
+            </div>
+            {welcomerStatus?.stats && (
+              <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono text-muted-foreground space-y-1">
+                <div>{welcomerStatus.stats.welcomed} welcomed{welcomerStatus.stats.failed > 0 ? " · " + welcomerStatus.stats.failed + " failed" : ""}</div>
+                {welcomerStatus.stats.lastMessage && <div>Last: {welcomerStatus.stats.lastMessage}</div>}
+                {welcomerStatus.stats.lastError && <div>Last error: {welcomerStatus.stats.lastError}</div>}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        )}
 
         {/* Music Player & Profile Sections */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
