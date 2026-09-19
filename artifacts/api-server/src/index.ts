@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { restoreSavedAccounts } from "./lib/token-store";
+import { restoreWelcomerConfig } from "./lib/welcomer";
 
 const rawPort = process.env["PORT"];
 
@@ -23,5 +24,6 @@ app.listen(port, (err) => {
   }
 
   logger.info({ port }, "Server listening");
+  void restoreWelcomerConfig();
   void restoreSavedAccounts();
 });
