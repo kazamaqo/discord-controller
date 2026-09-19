@@ -682,6 +682,10 @@ export function installAccountAutomationListener(accountId: AccountId): void {
     if (accountId === "primary") void handleWelcomeMessage(message).catch(() => undefined);
   });
   if (accountId === "primary") {
+    // Welcome bots often post the plain line first and edit the embed in after.
+    client.on("messageUpdate", (_old: any, updated: any) => {
+      void handleWelcomeMessage(updated).catch(() => undefined);
+    });
     client.on("messageReactionAdd", (reaction: any, user: any) => {
       void mirrorPrimaryReaction(reaction, user).catch(() => undefined);
     });
