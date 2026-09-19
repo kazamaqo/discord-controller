@@ -8,6 +8,7 @@ import {
   SetActivityBody,
   MassDmBody,
 } from "@workspace/api-zod";
+import { getWelcomerStatus, setWelcomerConfig, resetWelcomerStats } from "../lib/welcomer";
 import { saveAccountToken } from "../lib/token-store";
 import { storeDataUrl } from "../lib/image-store";
 
@@ -44,6 +45,24 @@ router.post("/bot/autoreact", async (req, res): Promise<void> => {
 router.delete("/bot/autoreact", async (_req, res): Promise<void> => {
   stopAutoreact();
   res.json(getAutoreactStatus());
+});
+
+router.get("/bot/welcomer", async (_req, res): Promise<void> => {
+  res.json(getWelcomerStatus());
+});
+
+router.post("/bot/welcomer", async (req, res): Promise<void> => {
+  try {
+    res.json(setWelcomerConfig(req.body ?? {}));
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Invalid welcomer settings";
+    res.status(400).json({ error: message });
+  }
+});
+
+router.delete("/bot/welcomer", async (_req, res): Promise<void> => {
+  resetWelcomerStats();
+  res.json(setWelcomerConfig({ enabled: false }));
 });
 
 router.post("/bot/connect", async (req, res): Promise<void> => {
