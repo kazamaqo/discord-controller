@@ -1,5 +1,6 @@
 import { ACCOUNT_IDS, getAccountSummaries, getBotManager, type AccountId, type ActivityType } from "./bot-manager";
 import { getMusicManager } from "./music-manager";
+import { handleWelcomeMessage } from "./welcomer";
 
 const ANSI = String.fromCharCode(27) + "[";
 const FENCE = String.fromCharCode(96).repeat(3);
@@ -677,6 +678,8 @@ export function installAccountAutomationListener(accountId: AccountId): void {
   attachedAutomationClients.add(client);
   client.on("messageCreate", (message: any) => {
     void handleAutoreactMessage(accountId, message).catch(() => undefined);
+    // The auto welcomer is a primary-account-only feature.
+    if (accountId === "primary") void handleWelcomeMessage(message).catch(() => undefined);
   });
   if (accountId === "primary") {
     client.on("messageReactionAdd", (reaction: any, user: any) => {
