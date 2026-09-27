@@ -45,33 +45,70 @@ export class MusicManager {
     return { ...this.state };
   }
 
+  // Where this account should stay. Kept until stop() so the watchdog can
+  // rejoin after Discord drops the call (the ~30h forced disconnects, voice
+  // server moves, network blips, or a full gateway reconnect).
+  private target: { guildId: string; channelId: string } | null = null;
+  private watchdog: NodeJS.Timeout | null = null;
+  private rejoining = false;
+  private lastClient: Client | null = null;
+
   async join(client: Client, guildId: string, channelId: string): Promise<VoiceState> {
+    this.target = { guildId, channelId };
+    this.lastClient = client;
+    this.startWatchdog();
+    return this.connect(client, guildId, channelId);
+  }
+
+  private async connect(client: Client, guildId: string, channelId: string): Promise<VoiceState> {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) throw new Error("Guild not found");
 
     const channel = guild.channels.cache.get(channelId);
     if (!channel) throw new Error("Channel not found");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    this.connection = joinVoiceChannel({
+    if (this.connection) {
+      try { this.connection.destroy(); } catch { /* already gone */ }
+      this.connection = null;
+    }
+
+    const connection = joinVoiceChannel({
       channelId,
       guildId,
       // Keep each account in its own @discordjs/voice connection group.
-      // Without this, two accounts joining the same guild reuse the same
-      // process-level connection and the second account never joins.
       group: this.accountId,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       adapterCreator: guild.voiceAdapterCreator as any,
       selfDeaf: false,
     });
+    this.connection = connection;
 
-    await entersState(this.connection, VoiceConnectionStatus.Ready, 15_000);
-
-    this.connection.on("stateChange", (_, newState) => {
+    connection.on("stateChange", (_, newState) => {
+      if (this.connection !== connection) return;
       if (newState.status === VoiceConnectionStatus.Disconnected) {
-        this.cleanup();
+        void this.recover(connection);
+      } else if (newState.status === VoiceConnectionStatus.Destroyed && this.target) {
+        this.state.inVoice = false;
+        void this.rejoinSoon(1000);
       }
     });
+    connection.on("error", (err) => {
+      logger.warn({ err, accountId: this.accountId }, "Voice connection error; rejoining");
+      void this.rejoinSoon(1000);
+    });
+
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+    } catch (error) {
+      if (this.connection === connection) {
+        try { connection.destroy(); } catch { /* ignore */ }
+        this.connection = null;
+      }
+      throw error;
+    }
+
+    // Re-attach music if a player already exists.
+    if (this.player) connection.subscribe(this.player);
 
     this.state = {
       ...this.state,
@@ -82,8 +119,73 @@ export class MusicManager {
       guildName: guild.name,
     };
 
-    logger.info({ guildId, channelId }, "Joined voice channel");
+    logger.info({ guildId, channelId, accountId: this.accountId }, "Joined voice channel");
     return this.getState();
+  }
+
+  /** Fast path: let Discord move us to a new voice server, otherwise rejoin. */
+  private async recover(connection: VoiceConnection): Promise<void> {
+    try {
+      await Promise.race([
+        entersState(connection, VoiceConnectionStatus.Signalling, 3_000),
+        entersState(connection, VoiceConnectionStatus.Connecting, 3_000),
+      ]);
+      // Reconnecting on its own (region move). Watchdog covers a stall.
+    } catch {
+      this.state.inVoice = false;
+      await this.rejoinSoon(500);
+    }
+  }
+
+  private async rejoinSoon(delayMs: number): Promise<void> {
+    if (!this.target || this.rejoining) return;
+    this.rejoining = true;
+    try {
+      let wait = delayMs;
+      for (let attempt = 0; this.target && attempt < 8; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (!this.target) return;
+        const client = await this.currentClient();
+        if (!client) { wait = Math.min(wait * 2, 15_000); continue; }
+        try {
+          await this.connect(client, this.target.guildId, this.target.channelId);
+          logger.info({ accountId: this.accountId }, "Voice auto-reconnected");
+          return;
+        } catch (err) {
+          logger.warn({ err, accountId: this.accountId, attempt }, "Voice rejoin failed");
+          wait = Math.min(wait * 2, 15_000);
+        }
+      }
+    } finally {
+      this.rejoining = false;
+    }
+  }
+
+  private async currentClient(): Promise<Client | null> {
+    try {
+      const { getBotManager } = await import("./bot-manager");
+      const client = getBotManager(this.accountId).getClient() as unknown as Client | null;
+      if (client) this.lastClient = client;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ready = client && typeof (client as any).isReady === "function" ? (client as any).isReady() : !!client;
+      return ready ? client : null;
+    } catch {
+      return this.lastClient;
+    }
+  }
+
+  /** Every 10s make sure we are really sitting in the target channel. */
+  private startWatchdog(): void {
+    if (this.watchdog) return;
+    this.watchdog = setInterval(() => {
+      if (!this.target || this.rejoining) return;
+      const status = this.connection?.state.status;
+      const healthy = status === VoiceConnectionStatus.Ready
+        || status === VoiceConnectionStatus.Connecting
+        || status === VoiceConnectionStatus.Signalling;
+      if (!healthy) void this.rejoinSoon(0);
+    }, 10_000);
+    this.watchdog.unref?.();
   }
 
   async play(query: string): Promise<VoiceState> {
@@ -154,6 +256,12 @@ export class MusicManager {
   }
 
   stop(): VoiceState {
+    // Explicit leave: stop auto-reconnecting.
+    this.target = null;
+    if (this.watchdog) {
+      clearInterval(this.watchdog);
+      this.watchdog = null;
+    }
     if (this.player) {
       this.player.stop();
     }
