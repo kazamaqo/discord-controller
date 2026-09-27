@@ -138,7 +138,7 @@ export default function Dashboard() {
   const loadAccountSummaries = async () => {
     try {
       const response = await fetch("/api/bot/accounts", { credentials: "same-origin" });
-      if (response.ok) setAccountSummaries(await response.json());
+      if (response.ok) { const list = await response.json(); if (Array.isArray(list)) setAccountSummaries(list.filter((a: any) => a && a.state)); }
     } finally {
       setAccountsLoaded(true);
     }
@@ -171,17 +171,22 @@ export default function Dashboard() {
     }
   });
 
-  const { data: whitelist = [], isLoading: whitelistLoading } = useGetWhitelist({
+  const { data: whitelistRaw, isLoading: whitelistLoading } = useGetWhitelist({
     query: { queryKey: [...getGetWhitelistQueryKey(), activeAccountId] },
   });
   
-  const { data: guilds = [] } = useGetGuilds({ query: { queryKey: [...getGetGuildsQueryKey(), activeAccountId] } });
+  const { data: guildsRaw } = useGetGuilds({ query: { queryKey: [...getGetGuildsQueryKey(), activeAccountId] } });
   const { data: voiceState } = useGetVoiceState({
     query: {
       refetchInterval: 3000,
       queryKey: [...getGetVoiceStateQueryKey(), activeAccountId],
     }
   });
+
+  // The API can briefly return an error object (expired session, restart);
+  // never let a non-array crash the whole dashboard into a black screen.
+  const whitelist = Array.isArray(whitelistRaw) ? whitelistRaw : [];
+  const guilds = Array.isArray(guildsRaw) ? guildsRaw : [];
 
   const disconnectBot = useDisconnectBot();
   const setStatus = useSetStatus();
@@ -1154,7 +1159,7 @@ export default function Dashboard() {
                       </span>
                     </div>
                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {massDmResult.details.map((detail, i) => (
+                      {(Array.isArray(massDmResult.details) ? massDmResult.details : []).map((detail, i) => (
                         <div key={i} className="flex items-center justify-between text-xs p-2 rounded bg-secondary/30">
                           <span className="font-sans font-medium">{detail.label} <span className="text-muted-foreground font-mono ml-1">{detail.userId}</span></span>
                           {detail.success ? (
