@@ -42,8 +42,9 @@ router.post("/bot/autoreact", async (req, res): Promise<void> => {
   }
 });
 
-router.delete("/bot/autoreact", async (_req, res): Promise<void> => {
-  stopAutoreact();
+router.delete("/bot/autoreact", async (req, res): Promise<void> => {
+  const id = typeof req.query?.id === "string" ? req.query.id : undefined;
+  stopAutoreact(id);
   res.json(getAutoreactStatus());
 });
 
