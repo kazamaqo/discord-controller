@@ -30,6 +30,7 @@ export type AutoreactConfig = {
   targetUserId: string;
   targetLabel: string;
   emojiId: string;
+  accountCount: number | "all";
   accountIds: AccountId[];
   channelId: string;
 };
@@ -161,7 +162,12 @@ function reactionErrorMessage(error: unknown): string {
   return "Discord rejected the reaction";
 }
 
-async function reactWithRetry(accountId: AccountId, message: any, emojiId: string, key: string): Promise<void> {
+async function reactWithRetry(
+  accountId: AccountId,
+  resolveMessage: () => Promise<any>,
+  emojiId: string,
+  key: string,
+): Promise<void> {
   const lastAttemptAt = autoreactLastAttemptAt.get(accountId) ?? 0;
   const waitFor = AUTOREACT_MIN_INTERVAL_MS - (Date.now() - lastAttemptAt);
   if (waitFor > 0) await sleep(waitFor);
@@ -170,7 +176,11 @@ async function reactWithRetry(accountId: AccountId, message: any, emojiId: strin
   for (let attempt = 0; attempt <= AUTOREACT_MAX_RETRIES; attempt += 1) {
     autoreactLastAttemptAt.set(accountId, Date.now());
     try {
-      await message.react(emojiId);
+      const target = await resolveMessage();
+      if (!target || typeof target.react !== "function") {
+        throw new Error("This account cannot see the message");
+      }
+      await target.react(emojiId);
       boundedSetAdd(autoreactedMessageKeys, key, 5000);
       autoreactStats.reacted += 1;
       autoreactStats.lastReactedAt = new Date().toISOString();
@@ -191,19 +201,28 @@ async function reactWithRetry(accountId: AccountId, message: any, emojiId: strin
   }
 
   autoreactStats.failed += 1;
-  autoreactStats.lastError = reactionErrorMessage(lastError);
+  autoreactStats.lastError = accountLabel(accountId) + ": " + reactionErrorMessage(lastError);
 }
 
-function queueAutoreact(accountId: AccountId, message: any, emojiId: string, key: string, runId: number): void {
+function queueAutoreact(
+  accountId: AccountId,
+  resolveMessage: () => Promise<any>,
+  authorId: string,
+  emojiId: string,
+  key: string,
+  runId: number,
+): void {
   const previous = autoreactQueues.get(accountId) ?? Promise.resolve();
   let next: Promise<void>;
   next = previous
     .catch(() => undefined)
     .then(async () => {
       if (runId !== autoreactRunId) return;
-      const stillActive = autoreactTargets.some((t) => t.accountIds.includes(accountId) && t.emojiId === emojiId && message.author?.id === t.targetUserId);
+      const stillActive = autoreactTargets.some(
+        (t) => resolveAccountIds(t).includes(accountId) && t.emojiId === emojiId && authorId === t.targetUserId,
+      );
       if (!stillActive) return;
-      await reactWithRetry(accountId, message, emojiId, key);
+      await reactWithRetry(accountId, resolveMessage, emojiId, key);
     })
     .finally(() => {
       pendingAutoreactKeys.delete(key);
@@ -212,21 +231,58 @@ function queueAutoreact(accountId: AccountId, message: any, emojiId: string, key
   autoreactQueues.set(accountId, next);
 }
 
-async function handleAutoreactMessage(accountId: AccountId, message: any): Promise<void> {
-  if (!autoreactTargets.length || !message.react) return;
+// Every listed account reacts, even when its own gateway never delivered the
+// message: each account re-fetches the message through its own client.
+function messageResolver(accountId: AccountId, observerAccountId: AccountId, message: any): () => Promise<any> {
+  if (accountId === observerAccountId) return async () => message;
+  const channelId = message.channel?.id;
+  const messageId = message.id;
+  return async () => {
+    const client = getBotManager(accountId).getClient() as any;
+    if (!client) throw new Error("Account is not connected");
+    if (!channelId || !messageId) throw new Error("Message is unavailable");
+    const channel = client.channels.cache?.get?.(channelId) ?? (await client.channels.fetch(channelId));
+    const fetched = await channel?.messages?.fetch(messageId);
+    if (!fetched) throw new Error("Message is unavailable for this account");
+    return fetched;
+  };
+}
+
+async function handleAutoreactMessage(observerAccountId: AccountId, message: any): Promise<void> {
+  if (!autoreactTargets.length) return;
   const messageId = typeof message.id === "string" ? message.id : null;
-  if (!messageId) return;
+  const authorId = message.author?.id;
+  if (!messageId || !authorId) return;
   const runId = autoreactRunId;
+
   for (const config of autoreactTargets) {
-    if (!config.accountIds.includes(accountId)) continue;
     if (config.channelId && message.channel?.id !== config.channelId) continue;
-    if (message.author?.id !== config.targetUserId) continue;
-    const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId;
-    if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) continue;
-    pendingAutoreactKeys.add(key);
+    if (authorId !== config.targetUserId) continue;
+
+    // Only the first account that sees the message fans the reaction out, so
+    // the work is not duplicated when several clients receive the same event.
+    const dispatchKey = runId + ":dispatch:" + messageId + ":" + config.emojiId;
+    if (autoreactedMessageKeys.has(dispatchKey) || pendingAutoreactKeys.has(dispatchKey)) continue;
+    boundedSetAdd(autoreactedMessageKeys, dispatchKey, 5000);
+
+    const accountIds = resolveAccountIds(config);
+    if (!accountIds.length) continue;
     autoreactStats.matched += 1;
     autoreactStats.lastMatchedAt = new Date().toISOString();
-    queueAutoreact(accountId, message, config.emojiId, key, runId);
+
+    for (const accountId of accountIds) {
+      const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId;
+      if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) continue;
+      pendingAutoreactKeys.add(key);
+      queueAutoreact(
+        accountId,
+        messageResolver(accountId, observerAccountId, message),
+        authorId,
+        config.emojiId,
+        key,
+        runId,
+      );
+    }
   }
 }
 
@@ -251,8 +307,16 @@ export function connectedAccountIds(): AccountId[] {
   return ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
 }
 
+// Accounts are resolved live, so an account that comes online after the
+// command was issued still reacts.
+export function resolveAccountIds(config: { accountCount: number | "all" }): AccountId[] {
+  const connected = connectedAccountIds();
+  if (config.accountCount === "all") return connected;
+  return connected.slice(0, Math.max(0, Math.min(config.accountCount, connected.length)));
+}
+
 export function getAutoreactStatus() {
-  const targets = autoreactTargets.map((t) => ({ ...t, accountIds: [...t.accountIds] }));
+  const targets = autoreactTargets.map((t) => ({ ...t, accountIds: resolveAccountIds(t) }));
   const first = targets[0];
   return {
     active: targets.length > 0,
@@ -273,27 +337,36 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
   const channelId = (options.channelId ?? "").trim();
   const emojiId = normalizeEmojiId(options.emojiId.trim());
   const connected = connectedAccountIds();
-  const requestedCount = options.accountCount === undefined || options.accountCount === "all" ? connected.length : Number(options.accountCount);
+  const accountCount: number | "all" = options.accountCount === undefined || options.accountCount === "all"
+    ? "all"
+    : Number(options.accountCount);
 
   if (!/^\d{5,25}$/.test(targetUserId) || (channelId && !/^\d{5,25}$/.test(channelId)) || !validEmojiId(emojiId)) {
     throw new Error("Invalid user, channel, or emoji");
   }
   if (!connected.length) throw new Error("No connected accounts are available");
-  if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length) {
+  if (accountCount !== "all" && (!Number.isInteger(accountCount) || accountCount < 1 || accountCount > ACCOUNT_IDS.length)) {
     throw new Error("Invalid account count");
   }
-  if (requestedCount > connected.length) {
-    throw new Error("Only " + connected.length + " connected account(s) are available");
-  }
 
-  const accountIds = connected.slice(0, requestedCount);
   const targetLabel = options.targetLabel?.trim() || targetUserId;
   const existing = autoreactTargets.find((t) => t.targetUserId === targetUserId && t.channelId === channelId);
   if (existing) {
-    Object.assign(existing, { emojiId, accountIds, targetLabel });
+    Object.assign(existing, { emojiId, accountCount, targetLabel });
+    existing.accountIds = resolveAccountIds(existing);
   } else {
     autoreactTargetSeq += 1;
-    autoreactTargets.push({ id: String(Date.now()) + "-" + autoreactTargetSeq, targetUserId, targetLabel, emojiId, accountIds, channelId });
+    const config: AutoreactConfig = {
+      id: String(Date.now()) + "-" + autoreactTargetSeq,
+      targetUserId,
+      targetLabel,
+      emojiId,
+      accountCount,
+      accountIds: [],
+      channelId,
+    };
+    config.accountIds = resolveAccountIds(config);
+    autoreactTargets.push(config);
   }
   return getAutoreactStatus();
 }
