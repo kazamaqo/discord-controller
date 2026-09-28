@@ -76,8 +76,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 type AccountId = "primary" | "secondary" | "account3" | "account4" | "account5" | "account6" | "account7" | "account8" | "account9" | "account10";
 const ACCOUNT_IDS = ["primary", "secondary", "account3", "account4", "account5", "account6", "account7", "account8", "account9", "account10"] as const;
 
+type AutoreactTarget = {
+  id: string;
+  targetUserId: string;
+  targetLabel: string;
+  emojiId: string;
+  channelId: string;
+  accountIds: AccountId[];
+};
+
 type AutoreactStatus = {
   active: boolean;
+  targets?: AutoreactTarget[];
   targetUserId: string | null;
   targetLabel: string | null;
   emojiId: string | null;
@@ -466,39 +476,47 @@ export default function Dashboard() {
   };
 
   const handleStartAutoreact = async () => {
-    if (!autoreactTargetUserId || !autoreactEmojiId || !autoreactChannelId) return;
+    // Several people can be added at once: separate IDs with commas, spaces or new lines.
+    const userIds = autoreactTargetUserId.split(/[\s,]+/).map(v => v.replace(/[<@!>]/g, "").trim()).filter(Boolean);
+    if (!userIds.length || !autoreactEmojiId) return;
     setAutoreactPending(true);
+    let added = 0;
     try {
-      const response = await fetch("/api/bot/autoreact", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          targetUserId: autoreactTargetUserId.trim(),
-          emojiId: autoreactEmojiId.trim(),
-          channelId: autoreactChannelId.trim(),
-          accountCount: autoreactAccountCount,
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error || "Could not start autoreact");
-      setAutoreactStatus(payload);
-      toast({ title: "Autoreact started" });
+      for (const userId of userIds) {
+        const response = await fetch("/api/bot/autoreact", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            targetUserId: userId,
+            emojiId: autoreactEmojiId.trim(),
+            channelId: autoreactChannelId.trim(),
+            accountCount: autoreactAccountCount,
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error((payload?.error || "Could not add autoreact") + " (" + userId + ")");
+        setAutoreactStatus(payload);
+        added += 1;
+      }
+      setAutoreactTargetUserId("");
+      toast({ title: "Autoreact added for " + added + " " + (added === 1 ? "person" : "people") });
     } catch (error) {
-      toast({ title: error instanceof Error ? error.message : "Could not start autoreact", variant: "destructive" });
+      toast({ title: error instanceof Error ? error.message : "Could not add autoreact", variant: "destructive" });
     } finally {
       setAutoreactPending(false);
     }
   };
 
-  const handleStopAutoreact = async () => {
+  const handleStopAutoreact = async (id?: string) => {
     setAutoreactPending(true);
     try {
-      const response = await fetch("/api/bot/autoreact", { method: "DELETE", credentials: "same-origin" });
+      const url = id ? "/api/bot/autoreact?id=" + encodeURIComponent(id) : "/api/bot/autoreact";
+      const response = await fetch(url, { method: "DELETE", credentials: "same-origin" });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || "Could not stop autoreact");
       setAutoreactStatus(payload);
-      toast({ title: "Autoreact stopped" });
+      toast({ title: id ? "Removed" : "Autoreact stopped for everyone" });
     } catch (error) {
       toast({ title: error instanceof Error ? error.message : "Could not stop autoreact", variant: "destructive" });
     } finally {
@@ -1193,15 +1211,15 @@ export default function Dashboard() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="space-y-2">
-                <Label className="text-[10px] uppercase text-muted-foreground">Target user ID</Label>
-                <Input value={autoreactTargetUserId} onChange={e => setAutoreactTargetUserId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+                <Label className="text-[10px] uppercase text-muted-foreground">User IDs (comma = many)</Label>
+                <Input value={autoreactTargetUserId} onChange={e => setAutoreactTargetUserId(e.target.value)} placeholder="111..., 222..., 333..." className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
                 <Label className="text-[10px] uppercase text-muted-foreground">Emoji</Label>
                 <Input value={autoreactEmojiId} onChange={e => setAutoreactEmojiId(e.target.value)} placeholder="😀, emoji ID, or <:name:id>" className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
-                <Label className="text-[10px] uppercase text-muted-foreground">Channel ID</Label>
+                <Label className="text-[10px] uppercase text-muted-foreground">Channel ID (blank = all)</Label>
                 <Input value={autoreactChannelId} onChange={e => setAutoreactChannelId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
               </div>
               <div className="space-y-2">
@@ -1216,19 +1234,24 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
-              <Button onClick={() => void handleStartAutoreact()} disabled={autoreactPending || !autoreactTargetUserId || !autoreactEmojiId || !autoreactChannelId} className="flex-1 uppercase text-xs tracking-wider">
+              <Button onClick={() => void handleStartAutoreact()} disabled={autoreactPending || !autoreactTargetUserId.trim() || !autoreactEmojiId} className="flex-1 uppercase text-xs tracking-wider">
                 <Zap className="w-4 h-4 mr-2" />
-                {autoreactPending ? "Updating..." : "Start autoreact"}
+                {autoreactPending ? "Updating..." : "Add to autoreact"}
               </Button>
               <Button variant="outline" onClick={() => void handleStopAutoreact()} disabled={autoreactPending || !autoreactStatus?.active} className="sm:w-40 uppercase text-xs tracking-wider">
-                Stop
+                Stop all
               </Button>
             </div>
             {autoreactStatus?.active && (
               <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-xs font-mono text-muted-foreground space-y-1">
-                <div>
-                  Active for {autoreactStatus.targetLabel || autoreactStatus.targetUserId} in channel {autoreactStatus.channelId} · {autoreactStatus.accountIds.length} account(s) · {autoreactStatus.emojiId}
-                </div>
+                {(Array.isArray(autoreactStatus.targets) ? autoreactStatus.targets : []).map(t => (
+                  <div key={t.id} className="flex items-center gap-2">
+                    <span className="flex-1 break-all">
+                      {t.emojiId} → {t.targetLabel || t.targetUserId} · {t.channelId ? "channel " + t.channelId : "all channels"} · {t.accountIds.length} account(s)
+                    </span>
+                    <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={autoreactPending} onClick={() => void handleStopAutoreact(t.id)}>Remove</Button>
+                  </div>
+                ))}
                 {autoreactStatus.stats && (
                   <div>
                     {autoreactStatus.stats.reacted}/{autoreactStatus.stats.matched} reacted
