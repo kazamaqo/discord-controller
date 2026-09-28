@@ -19,13 +19,14 @@ const HELP_MESSAGE = [
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact|xar [all|count] @user <emoji>" + ANSI + "0m",
-  ANSI + "1;36m- xautoreact off" + ANSI + "0m",
+  ANSI + "1;36m- xautoreact off [@user]" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
   ANSI + "1;33m- xdisconnect" + ANSI + "0m",
   FENCE,
 ].join(NL);
 
 export type AutoreactConfig = {
+  id: string;
   targetUserId: string;
   targetLabel: string;
   emojiId: string;
@@ -42,7 +43,8 @@ type AutoreactStats = {
   lastReactedAt: string | null;
 };
 
-let autoreactConfig: AutoreactConfig | null = null;
+let autoreactTargets: AutoreactConfig[] = [];
+let autoreactTargetSeq = 0;
 const attachedCommandClients = new WeakSet<object>();
 const attachedAutomationClients = new WeakSet<object>();
 const handledCommandMessages = new Set<string>();
@@ -198,8 +200,9 @@ function queueAutoreact(accountId: AccountId, message: any, emojiId: string, key
   next = previous
     .catch(() => undefined)
     .then(async () => {
-      const config = autoreactConfig;
-      if (runId !== autoreactRunId || !config || !config.accountIds.includes(accountId) || config.emojiId !== emojiId) return;
+      if (runId !== autoreactRunId) return;
+      const stillActive = autoreactTargets.some((t) => t.accountIds.includes(accountId) && t.emojiId === emojiId && message.author?.id === t.targetUserId);
+      if (!stillActive) return;
       await reactWithRetry(accountId, message, emojiId, key);
     })
     .finally(() => {
@@ -210,22 +213,21 @@ function queueAutoreact(accountId: AccountId, message: any, emojiId: string, key
 }
 
 async function handleAutoreactMessage(accountId: AccountId, message: any): Promise<void> {
-  const config = autoreactConfig;
-  if (!config || !config.accountIds.includes(accountId)) return;
-  if (message.channel?.id !== config.channelId) return;
-  if (message.author?.id !== config.targetUserId) return;
-  if (!message.react) return;
-
+  if (!autoreactTargets.length || !message.react) return;
   const messageId = typeof message.id === "string" ? message.id : null;
   if (!messageId) return;
   const runId = autoreactRunId;
-  const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId;
-  if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) return;
-
-  pendingAutoreactKeys.add(key);
-  autoreactStats.matched += 1;
-  autoreactStats.lastMatchedAt = new Date().toISOString();
-  queueAutoreact(accountId, message, config.emojiId, key, runId);
+  for (const config of autoreactTargets) {
+    if (!config.accountIds.includes(accountId)) continue;
+    if (config.channelId && message.channel?.id !== config.channelId) continue;
+    if (message.author?.id !== config.targetUserId) continue;
+    const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId;
+    if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) continue;
+    pendingAutoreactKeys.add(key);
+    autoreactStats.matched += 1;
+    autoreactStats.lastMatchedAt = new Date().toISOString();
+    queueAutoreact(accountId, message, config.emojiId, key, runId);
+  }
 }
 
 function extractInviteCode(value: string): string | null {
@@ -250,50 +252,63 @@ export function connectedAccountIds(): AccountId[] {
 }
 
 export function getAutoreactStatus() {
-  if (!autoreactConfig) {
-    return {
-      active: false,
-      targetUserId: null,
-      targetLabel: null,
-      emojiId: null,
-      channelId: null,
-      accountIds: [] as AccountId[],
-      stats: { ...autoreactStats },
-    };
-  }
-  return { active: true, ...autoreactConfig, accountIds: [...autoreactConfig.accountIds], stats: { ...autoreactStats } };
+  const targets = autoreactTargets.map((t) => ({ ...t, accountIds: [...t.accountIds] }));
+  const first = targets[0];
+  return {
+    active: targets.length > 0,
+    targets,
+    targetUserId: first?.targetUserId ?? null,
+    targetLabel: first?.targetLabel ?? null,
+    emojiId: first?.emojiId ?? null,
+    channelId: first?.channelId ?? null,
+    accountIds: first?.accountIds ?? ([] as AccountId[]),
+    stats: { ...autoreactStats },
+  };
 }
 
-export function startAutoreact(options: { targetUserId: string; targetLabel?: string; emojiId: string; channelId: string; accountCount?: number | "all" }) {
+// Adds a target (or updates the existing one for the same user + channel).
+// Channel may be blank = react in every channel.
+export function startAutoreact(options: { targetUserId: string; targetLabel?: string; emojiId: string; channelId?: string; accountCount?: number | "all" }) {
   const targetUserId = options.targetUserId.trim();
-  const channelId = options.channelId.trim();
+  const channelId = (options.channelId ?? "").trim();
   const emojiId = normalizeEmojiId(options.emojiId.trim());
   const connected = connectedAccountIds();
   const requestedCount = options.accountCount === undefined || options.accountCount === "all" ? connected.length : Number(options.accountCount);
 
-  if (!/^\d{5,25}$/.test(targetUserId) || !/^\d{5,25}$/.test(channelId) || !validEmojiId(emojiId)) {
-    throw new Error("Invalid target, channel, or emoji");
+  if (!/^\d{5,25}$/.test(targetUserId) || (channelId && !/^\d{5,25}$/.test(channelId)) || !validEmojiId(emojiId)) {
+    throw new Error("Invalid user, channel, or emoji");
   }
   if (!connected.length) throw new Error("No connected accounts are available");
   if (!Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > ACCOUNT_IDS.length) {
     throw new Error("Invalid account count");
   }
-
   if (requestedCount > connected.length) {
     throw new Error("Only " + connected.length + " connected account(s) are available");
   }
 
   const accountIds = connected.slice(0, requestedCount);
-  autoreactRunId += 1;
-  autoreactStats = createAutoreactStats();
-  autoreactedMessageKeys.clear();
-  pendingAutoreactKeys.clear();
-  autoreactConfig = { targetUserId, targetLabel: options.targetLabel?.trim() || targetUserId, emojiId, accountIds, channelId };
+  const targetLabel = options.targetLabel?.trim() || targetUserId;
+  const existing = autoreactTargets.find((t) => t.targetUserId === targetUserId && t.channelId === channelId);
+  if (existing) {
+    Object.assign(existing, { emojiId, accountIds, targetLabel });
+  } else {
+    autoreactTargetSeq += 1;
+    autoreactTargets.push({ id: String(Date.now()) + "-" + autoreactTargetSeq, targetUserId, targetLabel, emojiId, accountIds, channelId });
+  }
   return getAutoreactStatus();
 }
 
-export function stopAutoreact(): void {
-  autoreactConfig = null;
+// No id = stop everything. With id (or user id) = remove just that target.
+export function stopAutoreact(idOrUserId?: string): void {
+  if (!idOrUserId) {
+    autoreactTargets = [];
+    autoreactRunId += 1;
+    autoreactStats = createAutoreactStats();
+    autoreactedMessageKeys.clear();
+    pendingAutoreactKeys.clear();
+    return;
+  }
+  autoreactTargets = autoreactTargets.filter((t) => t.id !== idOrUserId && t.targetUserId !== idOrUserId);
 }
 
 async function handleCommand(message: any): Promise<void> {
@@ -585,8 +600,9 @@ async function handleCommand(message: any): Promise<void> {
   if (command === "autoreact" || command === "ar" || command === "react") {
     const action = args[0]?.toLowerCase();
     if (action === "off" || action === "stop" || action === "disable") {
-      stopAutoreact();
-      await replyAndDelete(message, "Autoreact stopped");
+      const who = mentionedUser(message, args.slice(1));
+      stopAutoreact(who?.id);
+      await replyAndDelete(message, who ? "Autoreact removed for " + who.label : "Autoreact stopped for everyone");
       return;
     }
 
@@ -607,7 +623,7 @@ async function handleCommand(message: any): Promise<void> {
         channelId: message.channel?.id ?? "",
         accountCount: !countArg || /^(?:all|every)$/i.test(countArg) ? "all" : Number(countArg),
       });
-      await replyAndDelete(message, "Autoreact started for " + target.label + " using " + status.accountIds.length + " connected account(s)");
+      await replyAndDelete(message, "Autoreact added for " + target.label + " (" + status.targets.length + " people active)");
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : "Invalid autoreact settings";
       await replyAndDelete(message, "Autoreact could not start: " + detail);
