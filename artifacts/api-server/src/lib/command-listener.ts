@@ -18,7 +18,7 @@ const HELP_MESSAGE = [
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
-  ANSI + "1;36m- xautoreact|xar [all|count] @user @user2 <emoji>" + ANSI + "0m",
+  ANSI + "1;36m- xautoreact|xar [all|count] @user @user2 <emoji> [super]" + ANSI + "0m",
   ANSI + "1;36m- xautoreact off [@user]" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
   ANSI + "1;33m- xdisconnect" + ANSI + "0m",
@@ -30,6 +30,7 @@ export type AutoreactConfig = {
   targetUserId: string;
   targetLabel: string;
   emojiId: string;
+  superReaction: boolean;
   accountCount: number | "all";
   accountIds: AccountId[];
   channelId: string;
@@ -164,8 +165,10 @@ function reactionErrorMessage(error: unknown): string {
 
 async function reactWithRetry(
   accountId: AccountId,
-  resolveMessage: () => Promise<any>,
+  channelId: string,
+  messageId: string,
   emojiId: string,
+  superReaction: boolean,
   key: string,
 ): Promise<void> {
   const lastAttemptAt = autoreactLastAttemptAt.get(accountId) ?? 0;
@@ -176,11 +179,16 @@ async function reactWithRetry(
   for (let attempt = 0; attempt <= AUTOREACT_MAX_RETRIES; attempt += 1) {
     autoreactLastAttemptAt.set(accountId, Date.now());
     try {
-      const target = await resolveMessage();
-      if (!target || typeof target.react !== "function") {
-        throw new Error("This account cannot see the message");
+      const client = getBotManager(accountId).getClient() as any;
+      if (!client) throw new Error("Account is not connected");
+      const channel = client.channels.cache?.get?.(channelId);
+      if (channel?.messages?.react) {
+        await channel.messages.react(messageId, emojiId, superReaction);
+      } else {
+        const targetChannel = await client.channels.fetch(channelId);
+        if (!targetChannel?.messages?.react) throw new Error("This account cannot access the channel");
+        await targetChannel.messages.react(messageId, emojiId, superReaction);
       }
-      await target.react(emojiId);
       boundedSetAdd(autoreactedMessageKeys, key, 5000);
       autoreactStats.reacted += 1;
       autoreactStats.lastReactedAt = new Date().toISOString();
@@ -206,9 +214,11 @@ async function reactWithRetry(
 
 function queueAutoreact(
   accountId: AccountId,
-  resolveMessage: () => Promise<any>,
+  channelId: string,
+  messageId: string,
   authorId: string,
   emojiId: string,
+  superReaction: boolean,
   key: string,
   runId: number,
 ): void {
@@ -219,10 +229,13 @@ function queueAutoreact(
     .then(async () => {
       if (runId !== autoreactRunId) return;
       const stillActive = autoreactTargets.some(
-        (t) => resolveAccountIds(t).includes(accountId) && t.emojiId === emojiId && authorId === t.targetUserId,
+        (t) => resolveAccountIds(t).includes(accountId)
+          && t.emojiId === emojiId
+          && t.superReaction === superReaction
+          && authorId === t.targetUserId,
       );
       if (!stillActive) return;
-      await reactWithRetry(accountId, resolveMessage, emojiId, key);
+      await reactWithRetry(accountId, channelId, messageId, emojiId, superReaction, key);
     })
     .finally(() => {
       pendingAutoreactKeys.delete(key);
@@ -231,28 +244,12 @@ function queueAutoreact(
   autoreactQueues.set(accountId, next);
 }
 
-// Every listed account reacts, even when its own gateway never delivered the
-// message: each account re-fetches the message through its own client.
-function messageResolver(accountId: AccountId, observerAccountId: AccountId, message: any): () => Promise<any> {
-  if (accountId === observerAccountId) return async () => message;
-  const channelId = message.channel?.id;
-  const messageId = message.id;
-  return async () => {
-    const client = getBotManager(accountId).getClient() as any;
-    if (!client) throw new Error("Account is not connected");
-    if (!channelId || !messageId) throw new Error("Message is unavailable");
-    const channel = client.channels.cache?.get?.(channelId) ?? (await client.channels.fetch(channelId));
-    const fetched = await channel?.messages?.fetch(messageId);
-    if (!fetched) throw new Error("Message is unavailable for this account");
-    return fetched;
-  };
-}
-
-async function handleAutoreactMessage(observerAccountId: AccountId, message: any): Promise<void> {
+async function handleAutoreactMessage(_observerAccountId: AccountId, message: any): Promise<void> {
   if (!autoreactTargets.length) return;
   const messageId = typeof message.id === "string" ? message.id : null;
+  const channelId = typeof message.channel?.id === "string" ? message.channel.id : null;
   const authorId = message.author?.id;
-  if (!messageId || !authorId) return;
+  if (!messageId || !channelId || !authorId) return;
   const runId = autoreactRunId;
 
   for (const config of autoreactTargets) {
@@ -261,7 +258,7 @@ async function handleAutoreactMessage(observerAccountId: AccountId, message: any
 
     // Only the first account that sees the message fans the reaction out, so
     // the work is not duplicated when several clients receive the same event.
-    const dispatchKey = runId + ":dispatch:" + messageId + ":" + config.emojiId;
+    const dispatchKey = runId + ":dispatch:" + messageId + ":" + config.emojiId + ":" + Number(config.superReaction);
     if (autoreactedMessageKeys.has(dispatchKey) || pendingAutoreactKeys.has(dispatchKey)) continue;
     boundedSetAdd(autoreactedMessageKeys, dispatchKey, 5000);
 
@@ -271,14 +268,16 @@ async function handleAutoreactMessage(observerAccountId: AccountId, message: any
     autoreactStats.lastMatchedAt = new Date().toISOString();
 
     for (const accountId of accountIds) {
-      const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId;
+      const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId + ":" + Number(config.superReaction);
       if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) continue;
       pendingAutoreactKeys.add(key);
       queueAutoreact(
         accountId,
-        messageResolver(accountId, observerAccountId, message),
+        channelId,
+        messageId,
         authorId,
         config.emojiId,
+        config.superReaction,
         key,
         runId,
       );
@@ -332,7 +331,7 @@ export function getAutoreactStatus() {
 
 // Adds a target (or updates the existing one for the same user + channel).
 // Channel may be blank = react in every channel.
-export function startAutoreact(options: { targetUserId: string; targetLabel?: string; emojiId: string; channelId?: string; accountCount?: number | "all" }) {
+export function startAutoreact(options: { targetUserId: string; targetLabel?: string; emojiId: string; channelId?: string; accountCount?: number | "all"; superReaction?: boolean }) {
   const targetUserId = options.targetUserId.trim();
   const channelId = (options.channelId ?? "").trim();
   const emojiId = normalizeEmojiId(options.emojiId.trim());
@@ -340,6 +339,7 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
   const accountCount: number | "all" = options.accountCount === undefined || options.accountCount === "all"
     ? "all"
     : Number(options.accountCount);
+  const superReaction = options.superReaction === true;
 
   if (!/^\d{5,25}$/.test(targetUserId) || (channelId && !/^\d{5,25}$/.test(channelId)) || !validEmojiId(emojiId)) {
     throw new Error("Invalid user, channel, or emoji");
@@ -352,7 +352,7 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
   const targetLabel = options.targetLabel?.trim() || targetUserId;
   const existing = autoreactTargets.find((t) => t.targetUserId === targetUserId && t.channelId === channelId);
   if (existing) {
-    Object.assign(existing, { emojiId, accountCount, targetLabel });
+    Object.assign(existing, { emojiId, accountCount, targetLabel, superReaction });
     existing.accountIds = resolveAccountIds(existing);
   } else {
     autoreactTargetSeq += 1;
@@ -361,6 +361,7 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
       targetUserId,
       targetLabel,
       emojiId,
+      superReaction,
       accountCount,
       accountIds: [],
       channelId,
@@ -685,11 +686,12 @@ async function handleCommand(message: any): Promise<void> {
     const ids = new Set<string>();
     for (const m of String(message.content ?? "").matchAll(/<@!?(\d{5,25})>/g)) ids.add(m[1]);
     for (const arg of args) if (/^\d{15,25}$/.test(arg)) ids.add(arg);
-    const emojiArg = args.find((value: string) => !/^<@!?\d+>$/.test(value) && !/^\d+$/.test(value) && validEmojiId(normalizeEmojiId(value)));
+    const superReaction = args.some((value: string) => /^(?:super|burst)$/i.test(value));
+    const emojiArg = args.find((value: string) => !/^(?:super|burst)$/i.test(value) && !/^<@!?\d+>$/.test(value) && !/^\d+$/.test(value) && validEmojiId(normalizeEmojiId(value)));
     const emojiId = emojiArg ? normalizeEmojiId(emojiArg) : null;
     const countArg = args.find((value: string) => /^(?:all|every|[1-9]|10)$/i.test(value));
     if (!ids.size || !emojiId) {
-      await replyAndDelete(message, "Usage: xautoreact [all|count] @user @user2 ... <emoji>");
+      await replyAndDelete(message, "Usage: xautoreact [all|count] @user @user2 ... <emoji> [super]");
       return;
     }
 
@@ -701,6 +703,7 @@ async function handleCommand(message: any): Promise<void> {
           emojiId,
           channelId: message.channel?.id ?? "",
           accountCount: !countArg || /^(?:all|every)$/i.test(countArg) ? "all" : Number(countArg),
+          superReaction,
         });
       }
       // Silent on success: just remove the command message.
