@@ -18,7 +18,7 @@ const HELP_MESSAGE = [
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
-  ANSI + "1;36m- xautoreact|xar [all|count] @user <emoji>" + ANSI + "0m",
+  ANSI + "1;36m- xautoreact|xar [all|count] @user @user2 <emoji>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact off [@user]" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
   ANSI + "1;33m- xdisconnect" + ANSI + "0m",
@@ -600,30 +600,38 @@ async function handleCommand(message: any): Promise<void> {
   if (command === "autoreact" || command === "ar" || command === "react") {
     const action = args[0]?.toLowerCase();
     if (action === "off" || action === "stop" || action === "disable") {
-      const who = mentionedUser(message, args.slice(1));
-      stopAutoreact(who?.id);
-      await replyAndDelete(message, who ? "Autoreact removed for " + who.label : "Autoreact stopped for everyone");
+      const offIds = [...String(message.content ?? "").matchAll(/<@!?(\d{5,25})>/g)].map((m) => m[1]);
+      for (const arg of args.slice(1)) if (/^\d{15,25}$/.test(arg)) offIds.push(arg);
+      if (offIds.length) offIds.forEach((id) => stopAutoreact(id));
+      else stopAutoreact();
+      await deleteControllerMessage(message);
       return;
     }
 
-    const target = mentionedUser(message, args);
-    const emojiArg = args.find((value: string) => value !== target?.id && validEmojiId(normalizeEmojiId(value)));
+    // Collect every mentioned person (<@id> or raw IDs) so one command can add many.
+    const ids = new Set<string>();
+    for (const m of String(message.content ?? "").matchAll(/<@!?(\d{5,25})>/g)) ids.add(m[1]);
+    for (const arg of args) if (/^\d{15,25}$/.test(arg)) ids.add(arg);
+    const emojiArg = args.find((value: string) => !/^<@!?\d+>$/.test(value) && !/^\d+$/.test(value) && validEmojiId(normalizeEmojiId(value)));
     const emojiId = emojiArg ? normalizeEmojiId(emojiArg) : null;
     const countArg = args.find((value: string) => /^(?:all|every|[1-9]|10)$/i.test(value));
-    if (!target || !emojiId) {
-      await replyAndDelete(message, "Usage: xautoreact [all|count] @user <emoji>");
+    if (!ids.size || !emojiId) {
+      await replyAndDelete(message, "Usage: xautoreact [all|count] @user @user2 ... <emoji>");
       return;
     }
 
     try {
-      const status = startAutoreact({
-        targetUserId: target.id,
-        targetLabel: target.label,
-        emojiId,
-        channelId: message.channel?.id ?? "",
-        accountCount: !countArg || /^(?:all|every)$/i.test(countArg) ? "all" : Number(countArg),
-      });
-      await replyAndDelete(message, "Autoreact added for " + target.label + " (" + status.targets.length + " people active)");
+      for (const id of ids) {
+        startAutoreact({
+          targetUserId: id,
+          targetLabel: "<@" + id + ">",
+          emojiId,
+          channelId: message.channel?.id ?? "",
+          accountCount: !countArg || /^(?:all|every)$/i.test(countArg) ? "all" : Number(countArg),
+        });
+      }
+      // Silent on success: just remove the command message.
+      await deleteControllerMessage(message);
     } catch (error: unknown) {
       const detail = error instanceof Error ? error.message : "Invalid autoreact settings";
       await replyAndDelete(message, "Autoreact could not start: " + detail);
