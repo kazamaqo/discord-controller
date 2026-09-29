@@ -19,7 +19,7 @@ const HELP_MESSAGE = [
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
   ANSI + "1;36m- xautoreact|xar [all|count] @user @user2 <emoji> [super]" + ANSI + "0m",
-  ANSI + "1;36m- xautoreact off [@user]" + ANSI + "0m",
+  ANSI + "1;36m- xautoreact list | xautoreact off [@user]" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
   ANSI + "1;33m- xdisconnect" + ANSI + "0m",
   FENCE,
@@ -81,6 +81,16 @@ function primaryManager() {
 }
 
 async function deleteControllerMessage(message: any): Promise<void> {
+  // Fast path: delete through the client that received the command.
+  try {
+    if (typeof message?.delete === "function") {
+      await message.delete();
+      return;
+    }
+  } catch {
+    // Fall through to the primary-client fetch below.
+  }
+
   const primaryClient = primaryManager().getClient() as any;
   const channelId = message.channel?.id;
   const messageId = message.id;
@@ -181,13 +191,15 @@ async function reactWithRetry(
     try {
       const client = getBotManager(accountId).getClient() as any;
       if (!client) throw new Error("Account is not connected");
-      const channel = client.channels.cache?.get?.(channelId);
-      if (channel?.messages?.react) {
-        await channel.messages.react(messageId, emojiId, superReaction);
-      } else {
-        const targetChannel = await client.channels.fetch(channelId);
-        if (!targetChannel?.messages?.react) throw new Error("This account cannot access the channel");
-        await targetChannel.messages.react(messageId, emojiId, superReaction);
+      const cachedChannel = client.channels.cache?.get?.(channelId);
+      const reactTarget = cachedChannel?.messages?.react ? cachedChannel : await client.channels.fetch(channelId);
+      if (!reactTarget?.messages?.react) throw new Error("This account cannot access the channel");
+      try {
+        await reactTarget.messages.react(messageId, emojiId, superReaction);
+      } catch (superError: unknown) {
+        if (!superReaction) throw superError;
+        // No Nitro on this account: follow with a normal reaction instead.
+        await reactTarget.messages.react(messageId, emojiId, false);
       }
       boundedSetAdd(autoreactedMessageKeys, key, 5000);
       autoreactStats.reacted += 1;
@@ -221,6 +233,7 @@ function queueAutoreact(
   superReaction: boolean,
   key: string,
   runId: number,
+  configSuperReaction: boolean,
 ): void {
   const previous = autoreactQueues.get(accountId) ?? Promise.resolve();
   let next: Promise<void>;
@@ -231,7 +244,7 @@ function queueAutoreact(
       const stillActive = autoreactTargets.some(
         (t) => resolveAccountIds(t).includes(accountId)
           && t.emojiId === emojiId
-          && t.superReaction === superReaction
+          && t.superReaction === configSuperReaction
           && authorId === t.targetUserId,
       );
       if (!stillActive) return;
@@ -267,7 +280,15 @@ async function handleAutoreactMessage(_observerAccountId: AccountId, message: an
     autoreactStats.matched += 1;
     autoreactStats.lastMatchedAt = new Date().toISOString();
 
-    for (const accountId of accountIds) {
+    // Account 5 (the Nitro account) leads with the super reaction; every other
+    // account follows and also attempts a super reaction, falling back to a
+    // normal reaction when the account has no Nitro.
+    const leadAccountId = ACCOUNT_IDS[4];
+    const orderedAccountIds = config.superReaction && leadAccountId && accountIds.includes(leadAccountId)
+      ? [leadAccountId, ...accountIds.filter((id) => id !== leadAccountId)]
+      : accountIds;
+
+    for (const accountId of orderedAccountIds) {
       const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId + ":" + Number(config.superReaction);
       if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) continue;
       pendingAutoreactKeys.add(key);
@@ -280,6 +301,7 @@ async function handleAutoreactMessage(_observerAccountId: AccountId, message: an
         config.superReaction,
         key,
         runId,
+        config.superReaction,
       );
     }
   }
@@ -673,6 +695,18 @@ async function handleCommand(message: any): Promise<void> {
   }
   if (command === "autoreact" || command === "ar" || command === "react") {
     const action = args[0]?.toLowerCase();
+    if (action === "list" || action === "ls" || action === "status") {
+      const lines = autoreactTargets.map((t, i) => {
+        const accounts = t.accountCount === "all" ? "all" : String(t.accountCount);
+        return (i + 1) + ". " + (t.targetLabel ?? "<@" + t.targetUserId + ">")
+          + " | emoji: " + t.emojiId
+          + " | accounts: " + accounts
+          + (t.superReaction ? " | super" : "")
+          + (t.channelId ? " | channel: " + t.channelId : "");
+      });
+      await replyAndDelete(message, lines.length ? "Active autoreacts:" + NL + lines.join(NL) : "No active autoreacts");
+      return;
+    }
     if (action === "off" || action === "stop" || action === "disable") {
       const offIds = [...String(message.content ?? "").matchAll(/<@!?(\d{5,25})>/g)].map((m) => m[1]);
       for (const arg of args.slice(1)) if (/^\d{15,25}$/.test(arg)) offIds.push(arg);
