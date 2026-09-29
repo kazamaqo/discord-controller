@@ -173,6 +173,24 @@ function reactionErrorMessage(error: unknown): string {
   return "Discord rejected the reaction";
 }
 
+const nitroCache = new Map<string, { value: boolean; at: number }>();
+async function accountHasNitro(accountId: string, client: any): Promise<boolean> {
+  const cached = nitroCache.get(accountId);
+  if (cached && Date.now() - cached.at < 10 * 60 * 1000) return cached.value;
+  let value = false;
+  try {
+    const res = await fetch("https://discord.com/api/v9/users/@me", { headers: { Authorization: client.token } });
+    if (res.ok) {
+      const me = (await res.json()) as { premium_type?: number };
+      value = Number(me.premium_type ?? 0) > 0;
+    }
+  } catch {
+    value = false;
+  }
+  nitroCache.set(accountId, { value, at: Date.now() });
+  return value;
+}
+
 async function reactWithRetry(
   accountId: AccountId,
   channelId: string,
@@ -198,13 +216,16 @@ async function reactWithRetry(
         // Super reactions are Nitro-only. Accounts without Nitro skip entirely
         // instead of falling back to a normal reaction (that created a second,
         // duplicate reaction bubble next to the super one).
-        const premiumType = Number(client.user?.premiumType ?? client.user?.premium_type ?? NaN);
-        if (Number.isFinite(premiumType) && premiumType <= 0) return;
-        try {
-          await reactTarget.messages.react(messageId, emojiId, true);
-        } catch {
-          return; // no Nitro / no super reactions left: stay silent, no fallback
-        }
+        if (!(await accountHasNitro(accountId, client))) return;
+        const token = client.token;
+        if (!token) return;
+        const encoded = encodeURIComponent(emojiId.replace(/^<a?:/, "").replace(/>$/, ""));
+        const res = await fetch(
+          "https://discord.com/api/v9/channels/" + channelId + "/messages/" + messageId
+            + "/reactions/" + encoded + "/@me?location=Message&type=1",
+          { method: "PUT", headers: { Authorization: token, "Content-Type": "application/json" } },
+        );
+        if (!res.ok) return; // never fall back to a normal reaction
       } else {
         await reactTarget.messages.react(messageId, emojiId, false);
       }
