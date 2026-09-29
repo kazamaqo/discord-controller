@@ -480,27 +480,24 @@ export default function Dashboard() {
     const userIds = autoreactTargetUserId.split(/[\s,]+/).map(v => v.replace(/[<@!>]/g, "").trim()).filter(Boolean);
     if (!userIds.length || !autoreactEmojiId) return;
     setAutoreactPending(true);
-    let added = 0;
+    const uniqueUserIds = [...new Set(userIds)].slice(0, 100);
     try {
-      for (const userId of userIds) {
-        const response = await fetch("/api/bot/autoreact", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            targetUserId: userId,
-            emojiId: autoreactEmojiId.trim(),
-            channelId: autoreactChannelId.trim(),
-            accountCount: autoreactAccountCount,
-          }),
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok) throw new Error((payload?.error || "Could not add autoreact") + " (" + userId + ")");
-        setAutoreactStatus(payload);
-        added += 1;
-      }
+      const response = await fetch("/api/bot/autoreact", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          targetUserIds: uniqueUserIds,
+          emojiId: autoreactEmojiId.trim(),
+          channelId: autoreactChannelId.trim(),
+          accountCount: autoreactAccountCount,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Could not add autoreact");
+      setAutoreactStatus(payload);
       setAutoreactTargetUserId("");
-      toast({ title: "Autoreact added for " + added + " " + (added === 1 ? "person" : "people") });
+      toast({ title: "Autoreact added for " + uniqueUserIds.length + " " + (uniqueUserIds.length === 1 ? "person" : "people") });
     } catch (error) {
       toast({ title: error instanceof Error ? error.message : "Could not add autoreact", variant: "destructive" });
     } finally {
@@ -1211,7 +1208,7 @@ export default function Dashboard() {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="space-y-2">
-                <Label className="text-[10px] uppercase text-muted-foreground">User IDs (comma = many)</Label>
+                <Label className="text-[10px] uppercase text-muted-foreground">User IDs (up to 100)</Label>
                 <Input value={autoreactTargetUserId} onChange={e => setAutoreactTargetUserId(e.target.value)} placeholder="111..., 222..., 333..." className="font-mono text-sm" />
               </div>
               <div className="space-y-2">

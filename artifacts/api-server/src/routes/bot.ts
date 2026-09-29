@@ -29,13 +29,20 @@ router.get("/bot/autoreact", async (_req, res): Promise<void> => {
 
 router.post("/bot/autoreact", async (req, res): Promise<void> => {
   const body = req.body ?? {};
-  const targetUserId = typeof body.targetUserId === "string" ? body.targetUserId : "";
+  const targetUserIds = Array.isArray(body.targetUserIds)
+    ? [...new Set(body.targetUserIds.filter((value: unknown): value is string => typeof value === "string"))].slice(0, 100)
+    : [typeof body.targetUserId === "string" ? body.targetUserId : ""];
   const targetLabel = typeof body.targetLabel === "string" ? body.targetLabel : undefined;
   const emojiId = typeof body.emojiId === "string" ? body.emojiId : "";
   const channelId = typeof body.channelId === "string" ? body.channelId : "";
   const accountCount = body.accountCount === undefined || body.accountCount === "all" ? "all" : Number(body.accountCount);
   try {
-    res.json(startAutoreact({ targetUserId, targetLabel, emojiId, channelId, accountCount }));
+    if (!targetUserIds.length) throw new Error("At least one user ID is required");
+    let status = getAutoreactStatus();
+    for (const targetUserId of targetUserIds) {
+      status = startAutoreact({ targetUserId, targetLabel, emojiId, channelId, accountCount });
+    }
+    res.json(status);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Invalid autoreact settings";
     res.status(400).json({ error: message });

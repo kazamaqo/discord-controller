@@ -46,6 +46,7 @@ type AutoreactStats = {
 };
 
 let autoreactTargets: AutoreactConfig[] = [];
+const autoreactTargetsByUser = new Map<string, AutoreactConfig[]>();
 let autoreactTargetSeq = 0;
 const attachedCommandClients = new WeakSet<object>();
 const attachedAutomationClients = new WeakSet<object>();
@@ -54,12 +55,11 @@ const mirroredReactionKeys = new Set<string>();
 const autoreactedMessageKeys = new Set<string>();
 const pendingAutoreactKeys = new Set<string>();
 const autoreactQueues = new Map<AccountId, Promise<void>>();
-const autoreactLastAttemptAt = new Map<AccountId, number>();
 let autoreactStats: AutoreactStats = createAutoreactStats();
 let autoreactRunId = 0;
 
 const AUTOREACT_MAX_RETRIES = 2;
-const AUTOREACT_MIN_INTERVAL_MS = 250;
+const AUTOREACT_TARGET_LIMIT = 100;
 
 function createAutoreactStats(): AutoreactStats {
   return {
@@ -199,19 +199,11 @@ async function reactWithRetry(
   superReaction: boolean,
   key: string,
 ): Promise<void> {
-  const lastAttemptAt = autoreactLastAttemptAt.get(accountId) ?? 0;
-  const waitFor = AUTOREACT_MIN_INTERVAL_MS - (Date.now() - lastAttemptAt);
-  if (waitFor > 0) await sleep(waitFor);
-
   let lastError: unknown = null;
   for (let attempt = 0; attempt <= AUTOREACT_MAX_RETRIES; attempt += 1) {
-    autoreactLastAttemptAt.set(accountId, Date.now());
     try {
       const client = getBotManager(accountId).getClient() as any;
-      if (!client) throw new Error("Account is not connected");
-      const cachedChannel = client.channels.cache?.get?.(channelId);
-      const reactTarget = cachedChannel?.messages?.react ? cachedChannel : await client.channels.fetch(channelId);
-      if (!reactTarget?.messages?.react) throw new Error("This account cannot access the channel");
+      if (!client?.token) throw new Error("Account is not connected");
       if (superReaction) {
         // Super reactions are Nitro-only. Accounts without Nitro skip entirely
         // instead of falling back to a normal reaction (that created a second,
@@ -227,7 +219,23 @@ async function reactWithRetry(
         );
         if (!res.ok) return; // never fall back to a normal reaction
       } else {
-        await reactTarget.messages.react(messageId, emojiId, false);
+        // Use Discord's reaction endpoint directly. This avoids a channel lookup
+        // and lets every connected account send its reaction at the same time.
+        const encoded = encodeURIComponent(emojiId.replace(/^<a?:/, "").replace(/>$/, ""));
+        const res = await fetch(
+          "https://discord.com/api/v9/channels/" + channelId + "/messages/" + messageId
+            + "/reactions/" + encoded + "/@me?location=Message",
+          { method: "PUT", headers: { Authorization: client.token } },
+        );
+        if (!res.ok) {
+          const error = new Error("Discord reaction failed (" + res.status + ")") as Error & { status?: number; retryAfter?: number };
+          error.status = res.status;
+          if (res.status === 429) {
+            const body = await res.json().catch(() => null) as { retry_after?: number } | null;
+            error.retryAfter = body?.retry_after ? body.retry_after * 1000 : undefined;
+          }
+          throw error;
+        }
       }
       boundedSetAdd(autoreactedMessageKeys, key, 5000);
       autoreactStats.reacted += 1;
@@ -269,11 +277,10 @@ function queueAutoreact(
     .catch(() => undefined)
     .then(async () => {
       if (runId !== autoreactRunId) return;
-      const stillActive = autoreactTargets.some(
+      const stillActive = (autoreactTargetsByUser.get(authorId) ?? []).some(
         (t) => resolveAccountIds(t).includes(accountId)
           && t.emojiId === emojiId
-          && t.superReaction === configSuperReaction
-          && authorId === t.targetUserId,
+          && t.superReaction === configSuperReaction,
       );
       if (!stillActive) return;
       await reactWithRetry(accountId, channelId, messageId, emojiId, superReaction, key);
@@ -293,9 +300,10 @@ async function handleAutoreactMessage(_observerAccountId: AccountId, message: an
   if (!messageId || !channelId || !authorId) return;
   const runId = autoreactRunId;
 
-  for (const config of autoreactTargets) {
+  // Indexed lookup keeps message handling constant-time even with 100 targets.
+  const matchingTargets = autoreactTargetsByUser.get(authorId) ?? [];
+  for (const config of matchingTargets) {
     if (config.channelId && message.channel?.id !== config.channelId) continue;
-    if (authorId !== config.targetUserId) continue;
 
     // Only the first account that sees the message fans the reaction out, so
     // the work is not duplicated when several clients receive the same event.
@@ -363,6 +371,15 @@ export function resolveAccountIds(config: { accountCount: number | "all" }): Acc
   return connected.slice(0, Math.max(0, Math.min(config.accountCount, connected.length)));
 }
 
+function rebuildAutoreactTargetIndex(): void {
+  autoreactTargetsByUser.clear();
+  for (const target of autoreactTargets) {
+    const targets = autoreactTargetsByUser.get(target.targetUserId) ?? [];
+    targets.push(target);
+    autoreactTargetsByUser.set(target.targetUserId, targets);
+  }
+}
+
 export function getAutoreactStatus() {
   const targets = autoreactTargets.map((t) => ({ ...t, accountIds: resolveAccountIds(t) }));
   const first = targets[0];
@@ -404,6 +421,7 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
     Object.assign(existing, { emojiId, accountCount, targetLabel, superReaction });
     existing.accountIds = resolveAccountIds(existing);
   } else {
+    if (autoreactTargets.length >= AUTOREACT_TARGET_LIMIT) throw new Error("Autoreact supports up to 100 people");
     autoreactTargetSeq += 1;
     const config: AutoreactConfig = {
       id: String(Date.now()) + "-" + autoreactTargetSeq,
@@ -418,6 +436,7 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
     config.accountIds = resolveAccountIds(config);
     autoreactTargets.push(config);
   }
+  rebuildAutoreactTargetIndex();
   return getAutoreactStatus();
 }
 
@@ -425,6 +444,7 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
 export function stopAutoreact(idOrUserId?: string): void {
   if (!idOrUserId) {
     autoreactTargets = [];
+    autoreactTargetsByUser.clear();
     autoreactRunId += 1;
     autoreactStats = createAutoreactStats();
     autoreactedMessageKeys.clear();
@@ -432,6 +452,7 @@ export function stopAutoreact(idOrUserId?: string): void {
     return;
   }
   autoreactTargets = autoreactTargets.filter((t) => t.id !== idOrUserId && t.targetUserId !== idOrUserId);
+  rebuildAutoreactTargetIndex();
 }
 
 async function handleCommand(message: any): Promise<void> {
