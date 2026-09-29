@@ -194,11 +194,18 @@ async function reactWithRetry(
       const cachedChannel = client.channels.cache?.get?.(channelId);
       const reactTarget = cachedChannel?.messages?.react ? cachedChannel : await client.channels.fetch(channelId);
       if (!reactTarget?.messages?.react) throw new Error("This account cannot access the channel");
-      try {
-        await reactTarget.messages.react(messageId, emojiId, superReaction);
-      } catch (superError: unknown) {
-        if (!superReaction) throw superError;
-        // No Nitro on this account: follow with a normal reaction instead.
+      if (superReaction) {
+        // Super reactions are Nitro-only. Accounts without Nitro skip entirely
+        // instead of falling back to a normal reaction (that created a second,
+        // duplicate reaction bubble next to the super one).
+        const premiumType = Number(client.user?.premiumType ?? client.user?.premium_type ?? NaN);
+        if (Number.isFinite(premiumType) && premiumType <= 0) return;
+        try {
+          await reactTarget.messages.react(messageId, emojiId, true);
+        } catch {
+          return; // no Nitro / no super reactions left: stay silent, no fallback
+        }
+      } else {
         await reactTarget.messages.react(messageId, emojiId, false);
       }
       boundedSetAdd(autoreactedMessageKeys, key, 5000);
@@ -280,9 +287,8 @@ async function handleAutoreactMessage(_observerAccountId: AccountId, message: an
     autoreactStats.matched += 1;
     autoreactStats.lastMatchedAt = new Date().toISOString();
 
-    // Account 5 (the Nitro account) leads with the super reaction; every other
-    // account follows and also attempts a super reaction, falling back to a
-    // normal reaction when the account has no Nitro.
+    // Account 5 (the Nitro account) leads with the super reaction; other
+    // accounts only super react if they have Nitro, otherwise they skip.
     const leadAccountId = ACCOUNT_IDS[4];
     const orderedAccountIds = config.superReaction && leadAccountId && accountIds.includes(leadAccountId)
       ? [leadAccountId, ...accountIds.filter((id) => id !== leadAccountId)]
