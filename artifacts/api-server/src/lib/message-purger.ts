@@ -19,6 +19,8 @@ type PurgeJob = {
   lastDeletedAt: string | null;
   finishedAt: string | null;
   message: string;
+  recent?: { id: string; channelId: string; at: string; result: "deleted" | "skipped" | "retry" }[];
+  perMinute?: number;
 };
 
 const API = "https://discord.com/api/v9";
@@ -94,8 +96,20 @@ async function retryAfter(res: Response): Promise<number> {
   return Math.min(Math.max((body?.retry_after ?? 1) * 1000, 300), 60000);
 }
 
+function logRecent(job: PurgeJob, channelId: string, id: string, result: "deleted" | "skipped" | "retry"): void {
+  const recent = job.recent ?? (job.recent = []);
+  recent.unshift({ id, channelId, at: new Date().toISOString(), result });
+  if (recent.length > 25) recent.length = 25;
+  const since = Date.now() - 60000;
+  job.perMinute = recent.filter((r) => r.result === "deleted" && Date.parse(r.at) >= since).length;
+}
+
+// Never gives up on temporary errors: retries with backoff until the delete
+// lands or the job is stopped. Only truly undeletable messages are skipped.
 async function deleteOne(job: PurgeJob, runId: number, channelId: string, messageId: string): Promise<void> {
-  for (let attempt = 0; attempt < 6 && isActive(job.guildId, runId); attempt += 1) {
+  let attempt = 0;
+  let unarchived = false;
+  while (isActive(job.guildId, runId)) {
     const auth = await waitForClient(job, runId);
     if (!auth) return;
     try {
@@ -103,22 +117,35 @@ async function deleteOne(job: PurgeJob, runId: number, channelId: string, messag
       if (res.ok || res.status === 404) {
         job.deleted += 1;
         job.lastDeletedAt = new Date().toISOString();
+        logRecent(job, channelId, messageId, "deleted");
         return;
       }
       if (res.status === 429) { await sleep(await retryAfter(res)); continue; }
       if (res.status === 403 || res.status === 400) {
-        // System messages / archived threads / no access: cannot be deleted.
+        const body = await res.json().catch(() => null) as { code?: number } | null;
+        // Archived thread: reopen it once, then retry the delete.
+        if (body?.code === 50083 && !unarchived) {
+          unarchived = true;
+          await fetch(API + "/channels/" + channelId, {
+            method: "PATCH",
+            headers: { Authorization: auth.token, "Content-Type": "application/json" },
+            body: JSON.stringify({ archived: false }),
+          }).catch(() => undefined);
+          continue;
+        }
+        // System messages / no access: these really can't be deleted.
         skippedIds.get(job.guildId)?.add(messageId);
         job.skipped += 1;
+        logRecent(job, channelId, messageId, "skipped");
         return;
       }
-      await sleep(1000 * (attempt + 1));
     } catch {
-      await sleep(2000 * (attempt + 1));
+      // network error, retry below
     }
+    attempt += 1;
+    if (attempt === 3) { job.failed += 1; logRecent(job, channelId, messageId, "retry"); }
+    await sleep(Math.min(1000 * 2 ** Math.min(attempt, 5), 30000));
   }
-  job.failed += 1;
-  skippedIds.get(job.guildId)?.add(messageId);
 }
 
 async function run(job: PurgeJob, runId: number): Promise<void> {
