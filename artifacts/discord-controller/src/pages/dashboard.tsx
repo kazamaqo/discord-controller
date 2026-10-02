@@ -85,6 +85,20 @@ type AutoreactTarget = {
   accountIds: AccountId[];
 };
 
+type PurgeJob = {
+  guildId: string;
+  guildName: string;
+  state: "idle" | "running" | "waiting" | "done" | "stopped" | "error";
+  total: number | null;
+  deleted: number;
+  skipped: number;
+  failed: number;
+  message: string;
+  lastDeletedAt: string | null;
+};
+
+type PurgeStatus = { active: boolean; jobs: PurgeJob[] };
+
 type AutoreactStatus = {
   active: boolean;
   targets?: AutoreactTarget[];
@@ -374,6 +388,9 @@ export default function Dashboard() {
   const [autoreactAccountCount, setAutoreactAccountCount] = useState("all");
   const [autoreactStatus, setAutoreactStatus] = useState<AutoreactStatus | null>(null);
   const [autoreactPending, setAutoreactPending] = useState(false);
+  const [purgeGuildIds, setPurgeGuildIds] = useState("");
+  const [purgeStatus, setPurgeStatus] = useState<PurgeStatus | null>(null);
+  const [purgePending, setPurgePending] = useState(false);
 
   const [welcomerStatus, setWelcomerStatus] = useState<WelcomerStatus | null>(null);
   const [welcomerChannelId, setWelcomerChannelId] = useState("");
@@ -397,8 +414,17 @@ export default function Dashboard() {
         // The dashboard can still operate if the status request is temporarily unavailable.
       }
     };
+    const loadPurgeStatus = async () => {
+      try {
+        const response = await fetch("/api/bot/purge", { credentials: "same-origin" });
+        if (response.ok && mounted) setPurgeStatus(await response.json());
+      } catch {
+        // Status refresh is best-effort.
+      }
+    };
     void loadAutoreactStatus();
-    const interval = window.setInterval(() => void loadAutoreactStatus(), 5000);
+    void loadPurgeStatus();
+    const interval = window.setInterval(() => { void loadAutoreactStatus(); void loadPurgeStatus(); }, 3000);
     return () => {
       mounted = false;
       window.clearInterval(interval);
@@ -502,6 +528,36 @@ export default function Dashboard() {
       toast({ title: error instanceof Error ? error.message : "Could not add autoreact", variant: "destructive" });
     } finally {
       setAutoreactPending(false);
+    }
+  };
+
+  const purgeRequest = async (method: "POST" | "DELETE", query = "", body?: unknown) => {
+    setPurgePending(true);
+    try {
+      const response = await fetch("/api/bot/purge" + query, {
+        method,
+        credentials: "same-origin",
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(payload?.error || "Request failed");
+      setPurgeStatus(payload);
+      return true;
+    } catch (error) {
+      toast({ title: error instanceof Error ? error.message : "Request failed", variant: "destructive" });
+      return false;
+    } finally {
+      setPurgePending(false);
+    }
+  };
+
+  const handleStartPurge = async () => {
+    if (!purgeGuildIds.trim()) return;
+    if (!window.confirm("Delete ALL your messages in these servers? This can't be undone.")) return;
+    if (await purgeRequest("POST", "", { guildIds: purgeGuildIds })) {
+      setPurgeGuildIds("");
+      toast({ title: "Auto delete started" });
     }
   };
 
@@ -1196,6 +1252,53 @@ export default function Dashboard() {
           </div>
 
         </div>
+
+        <Card className="border-border bg-card shadow-md mb-6">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
+              <Trash2 className="w-4 h-4" />
+              Auto Delete My Messages
+              {purgeStatus?.active && <Badge variant="outline" className="ml-auto text-foreground border-border">RUNNING</Badge>}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">Server IDs (primary account)</Label>
+                <Input value={purgeGuildIds} onChange={e => setPurgeGuildIds(e.target.value)} placeholder="123456789012345678, ..." className="font-mono text-sm" />
+              </div>
+              <div className="flex gap-2 sm:items-end">
+                <Button onClick={() => void handleStartPurge()} disabled={purgePending || !purgeGuildIds.trim()} className="flex-1 uppercase text-xs tracking-wider">Start</Button>
+                <Button variant="outline" onClick={() => void purgeRequest("DELETE")} disabled={purgePending || !purgeStatus?.active} className="flex-1 uppercase text-xs tracking-wider">Stop all</Button>
+              </div>
+            </div>
+            {purgeStatus?.jobs?.length ? (
+              <div className="space-y-2">
+                {purgeStatus.jobs.map(job => {
+                  const pct = job.total ? Math.min(100, Math.round((job.deleted / job.total) * 100)) : 0;
+                  const live = job.state === "running" || job.state === "waiting";
+                  return (
+                    <div key={job.guildId} className="rounded-md border border-border p-3 space-y-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="font-medium truncate">{job.guildName}</span>
+                        <Badge variant="outline" className="text-[10px] uppercase">{job.state}</Badge>
+                        <span className="ml-auto font-mono text-xs text-muted-foreground">{job.deleted}{job.total !== null ? " / " + job.total : ""}</span>
+                        {live
+                          ? <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("DELETE", "?guildId=" + job.guildId)}>Stop</Button>
+                          : job.state !== "done" && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("POST", "", { guildIds: job.guildId })}>Resume</Button>}
+                      </div>
+                      <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary transition-all" style={{ width: pct + "%" }} /></div>
+                      <p className="text-xs text-muted-foreground">{job.message}{job.skipped ? " · " + job.skipped + " can't be deleted" : ""}{job.failed ? " · " + job.failed + " failed" : ""}</p>
+                    </div>
+                  );
+                })}
+                {purgeStatus.jobs.some(j => j.state === "done" || j.state === "stopped" || j.state === "error") && (
+                  <Button size="sm" variant="ghost" className="text-xs" disabled={purgePending} onClick={() => void purgeRequest("DELETE", "?clear=1")}>Clear finished</Button>
+                )}
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
 
         <Card className="border-border bg-card shadow-md mb-6">
           <CardHeader className="pb-4">

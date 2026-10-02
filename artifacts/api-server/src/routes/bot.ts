@@ -11,6 +11,7 @@ import {
 import { getWelcomerStatus, setWelcomerConfig, resetWelcomerStats } from "../lib/welcomer";
 import { saveAccountToken } from "../lib/token-store";
 import { storeDataUrl } from "../lib/image-store";
+import { clearFinishedPurges, getMessagePurgeStatus, restoreMessagePurges, startMessagePurge, stopMessagePurge } from "../lib/message-purger";
 
 const router: IRouter = Router();
 
@@ -54,6 +55,30 @@ router.delete("/bot/autoreact", async (req, res): Promise<void> => {
   stopAutoreact(id);
   res.json(getAutoreactStatus());
 });
+
+router.get("/bot/purge", async (_req, res): Promise<void> => {
+  res.json(getMessagePurgeStatus());
+});
+
+router.post("/bot/purge", async (req, res): Promise<void> => {
+  const raw = typeof req.body?.guildIds === "string" ? req.body.guildIds : String(req.body?.guildId ?? "");
+  const ids = [...new Set(raw.split(/[\s,]+/).filter(Boolean))];
+  try {
+    if (!ids.length) throw new Error("Server ID is required");
+    for (const id of ids) startMessagePurge(id);
+    res.json(getMessagePurgeStatus());
+  } catch (error: unknown) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Could not start" });
+  }
+});
+
+router.delete("/bot/purge", async (req, res): Promise<void> => {
+  if (req.query?.clear === "1") clearFinishedPurges();
+  else stopMessagePurge(typeof req.query?.guildId === "string" ? req.query.guildId : undefined);
+  res.json(getMessagePurgeStatus());
+});
+
+void restoreMessagePurges();
 
 router.get("/bot/welcomer", async (_req, res): Promise<void> => {
   res.json(getWelcomerStatus());
