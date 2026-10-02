@@ -95,6 +95,8 @@ type PurgeJob = {
   failed: number;
   message: string;
   lastDeletedAt: string | null;
+  recent?: { id: string; channelId: string; at: string; result: "deleted" | "skipped" | "retry" }[];
+  perMinute?: number;
 };
 
 type PurgeStatus = { active: boolean; jobs: PurgeJob[] };
@@ -1288,7 +1290,19 @@ export default function Dashboard() {
                           : job.state !== "done" && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("POST", "", { guildIds: job.guildId })}>Resume</Button>}
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary transition-all" style={{ width: pct + "%" }} /></div>
-                      <p className="text-xs text-muted-foreground">{job.message}{job.skipped ? " · " + job.skipped + " can't be deleted" : ""}{job.failed ? " · " + job.failed + " failed" : ""}</p>
+                      <p className="text-xs text-muted-foreground">{job.message}{job.skipped ? " · " + job.skipped + " can't be deleted" : ""}{job.failed ? " · " + job.failed + " retried" : ""}{live && job.perMinute ? " · " + job.perMinute + "/min" : ""}</p>
+                      <p className="text-[10px] text-muted-foreground">Runs on the server — keeps going after you close this tab.</p>
+                      {job.recent?.length ? (
+                        <div className="max-h-32 overflow-y-auto rounded bg-muted/40 p-2 font-mono text-[10px] space-y-0.5">
+                          {job.recent.map(r => (
+                            <div key={r.id + r.at} className="flex gap-2">
+                              <span className="text-muted-foreground">{new Date(r.at).toLocaleTimeString()}</span>
+                              <span className={r.result === "deleted" ? "text-primary" : "text-muted-foreground"}>{r.result === "deleted" ? "deleted" : r.result === "skipped" ? "can't delete" : "retrying"}</span>
+                              <span className="truncate text-muted-foreground">#{r.channelId} · {r.id}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
