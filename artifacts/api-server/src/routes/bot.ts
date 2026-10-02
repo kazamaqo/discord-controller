@@ -61,7 +61,7 @@ router.get("/bot/purge", async (_req, res): Promise<void> => {
 });
 
 router.post("/bot/purge", async (req, res): Promise<void> => {
-  const raw = typeof req.body?.guildIds === "string" ? req.body.guildIds : String(req.body?.guildId ?? "");
+  const raw: string = typeof req.body?.guildIds === "string" ? req.body.guildIds : String(req.body?.guildId ?? "");
   const ids = [...new Set(raw.split(/[\s,]+/).filter(Boolean))];
   try {
     if (!ids.length) throw new Error("Server ID is required");
