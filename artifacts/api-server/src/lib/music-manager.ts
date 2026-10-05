@@ -61,10 +61,18 @@ export class MusicManager {
   }
 
   private async connect(client: Client, guildId: string, channelId: string): Promise<VoiceState> {
-    const guild = client.guilds.cache.get(guildId);
+    let guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      // Cache can be stale right after a gateway reconnect; refetch once.
+      guild = await client.guilds.fetch(guildId).catch(() => undefined);
+    }
     if (!guild) throw new Error("Guild not found");
 
-    const channel = guild.channels.cache.get(channelId);
+    let channel = guild.channels.cache.get(channelId);
+    if (!channel) {
+      const fetched = await guild.channels.fetch(channelId).catch(() => null);
+      if (fetched) channel = fetched as typeof channel;
+    }
     if (!channel) throw new Error("Channel not found");
 
     if (this.connection) {
@@ -142,7 +150,8 @@ export class MusicManager {
     this.rejoining = true;
     try {
       let wait = delayMs;
-      for (let attempt = 0; this.target && attempt < 8; attempt += 1) {
+      // Never give up: keep retrying until stop() clears the target.
+      for (let attempt = 0; this.target; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, wait));
         if (!this.target) return;
         const client = await this.currentClient();
@@ -174,16 +183,42 @@ export class MusicManager {
     }
   }
 
+  /**
+   * The voice library can keep reporting Ready after Discord silently drops
+   * the account from the channel (the long-session kills around ~80h). Check
+   * the gateway client's own voice state, not just the connection status.
+   */
+  private async verifyInChannel(): Promise<void> {
+    if (!this.target) return;
+    const status = this.connection?.state.status;
+    const healthy = status === VoiceConnectionStatus.Ready
+      || status === VoiceConnectionStatus.Connecting
+      || status === VoiceConnectionStatus.Signalling;
+    if (!healthy) {
+      void this.rejoinSoon(0);
+      return;
+    }
+    const client = await this.currentClient();
+    if (!client) return;
+    const guild = client.guilds.cache.get(this.target.guildId);
+    // Cache can be empty right after a gateway reconnect; the rejoin loop
+    // waits for the cache and retries, so treat a missing guild as dropped.
+    const me = guild?.members.me
+      ?? (client.user ? guild?.members.cache.get(client.user.id) : null);
+    const actual = me?.voice?.channelId ?? null;
+    if (actual !== this.target.channelId) {
+      logger.warn({ accountId: this.accountId, actual }, "Voice watchdog: not in target channel; rejoining");
+      this.state.inVoice = false;
+      void this.rejoinSoon(0);
+    }
+  }
+
   /** Every 10s make sure we are really sitting in the target channel. */
   private startWatchdog(): void {
     if (this.watchdog) return;
     this.watchdog = setInterval(() => {
       if (!this.target || this.rejoining) return;
-      const status = this.connection?.state.status;
-      const healthy = status === VoiceConnectionStatus.Ready
-        || status === VoiceConnectionStatus.Connecting
-        || status === VoiceConnectionStatus.Signalling;
-      if (!healthy) void this.rejoinSoon(0);
+      void this.verifyInChannel();
     }, 10_000);
     this.watchdog.unref?.();
   }
