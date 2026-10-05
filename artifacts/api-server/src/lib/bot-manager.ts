@@ -80,13 +80,21 @@ export class BotManager {
     return this.client;
   }
 
+  private token: string | null = null;
+  private intentionalDisconnect = false;
+  private reconnecting = false;
+
   async connect(token: string): Promise<BotState> {
     if (this.client) {
       await this.disconnect();
     }
 
+    this.token = token;
+    this.intentionalDisconnect = false;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     this.client = new Client({ checkUpdate: false } as any);
+    this.attachDropHandlers(this.client);
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -136,6 +144,86 @@ export class BotManager {
     });
   }
 
+  /**
+   * Discord force-closes long-lived gateway sessions (the ~80h drops). When
+   * that happens the client never recovers on its own, which also kills the
+   * voice connection. These handlers kick off the reconnect loop instead.
+   */
+  private attachDropHandlers(client: Client): void {
+    const onDrop = (): void => {
+      if (this.intentionalDisconnect || !this.token) return;
+      logger.warn("Gateway connection dropped; reconnecting");
+      this.state.connected = false;
+      void this.reconnectLoop();
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).on("shardDisconnect", onDrop);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).on("disconnect", onDrop);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (client as any).on("invalidated", onDrop);
+  }
+
+  /** Re-login forever (with backoff) until disconnect() is called on purpose. */
+  private async reconnectLoop(): Promise<void> {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    let wait = 2000;
+    try {
+      while (!this.intentionalDisconnect && this.token) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (this.intentionalDisconnect || !this.token) return;
+        try {
+          if (this.client) {
+            try { await this.client.destroy(); } catch { /* already gone */ }
+          }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const client = new Client({ checkUpdate: false } as any);
+          this.client = client;
+          this.attachDropHandlers(client);
+
+          const reapply = (): void => {
+            void this.applyPresence().catch((err) => logger.warn({ err }, "Presence re-apply failed"));
+          };
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (client as any).on("resumed", reapply);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (client as any).on("shardResume", reapply);
+
+          const ready = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error("Reconnect timed out")), 30000);
+            client.once("ready", () => { clearTimeout(timeout); resolve(); });
+            client.once("error", (err) => { clearTimeout(timeout); reject(err); });
+          });
+          const loginResult = await client.login(this.token).then(() => true).catch(() => false);
+          if (!loginResult) throw new Error("Re-login failed");
+          await ready;
+
+          const user = client.user!;
+          this.state = {
+            ...this.state,
+            connected: true,
+            username: user.username,
+            discriminator: user.discriminator,
+            avatarUrl: user.displayAvatarURL(),
+            userId: user.id,
+          };
+          logger.info({ userId: user.id, username: user.username }, "Bot reconnected");
+          void this.ensureActivityVisibility()
+            .then(() => this.applyPresence())
+            .catch((err) => logger.warn({ err }, "Presence update after reconnect failed"));
+          this.startPresenceRefresh();
+          return;
+        } catch (err) {
+          logger.warn({ err, wait }, "Reconnect attempt failed; retrying");
+          wait = Math.min(wait * 2, 60_000);
+        }
+      }
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
   private startPresenceRefresh(): void {
     this.stopPresenceRefresh();
     this.refreshTimer = setInterval(() => {
@@ -166,6 +254,8 @@ export class BotManager {
   }
 
   async disconnect(): Promise<BotState> {
+    this.intentionalDisconnect = true;
+    this.token = null;
     this.stopPresenceRefresh();
     if (this.client) {
       try {
