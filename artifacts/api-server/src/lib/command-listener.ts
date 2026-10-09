@@ -1,6 +1,7 @@
 import { ACCOUNT_IDS, getAccountSummaries, getBotManager, type AccountId, type ActivityType } from "./bot-manager";
 import { getMusicManager } from "./music-manager";
 import { handleWelcomeMessage } from "./welcomer";
+import { clearMentions, mentionChunks, recordMention } from "./mention-log";
 
 const ANSI = String.fromCharCode(27) + "[";
 const FENCE = String.fromCharCode(96).repeat(3);
@@ -18,6 +19,7 @@ const HELP_MESSAGE = [
   ANSI + "1;31m- xnickname <guild-id> <nickname>" + ANSI + "0m",
   ANSI + "1;36m- xnick <nickname> (all connected accounts in this server)" + ANSI + "0m",
   ANSI + "1;36m- xlink <discord-invite-link>" + ANSI + "0m",
+  ANSI + "1;33m- xcheck (messages mentioning you) | xcheck clear" + ANSI + "0m",
   ANSI + "1;36m- xautoreact|xar [all|count] @user @user2 <emoji> [super]" + ANSI + "0m",
   ANSI + "1;36m- xautoreact list | xautoreact off [@user]" + ANSI + "0m",
   ANSI + "1;32m- xaccounts" + ANSI + "0m",
@@ -479,6 +481,15 @@ async function handleCommand(message: any): Promise<void> {
     await replyAndDelete(message, HELP_MESSAGE);
     return;
   }
+  if (command === "check") {
+    await deleteControllerMessage(message);
+    if (args[0]?.toLowerCase() === "clear") {
+      clearMentions();
+      return;
+    }
+    for (const chunk of mentionChunks()) await send(message, chunk);
+    return;
+  }
   if (command === "accounts") {
     const lines = getAccountSummaries().map((account) => account.label + ": " + (account.state.connected ? "connected" : "disconnected") + (account.state.username ? " (" + account.state.username + ")" : ""));
     await replyAndDelete(message, lines.join(NL));
@@ -862,6 +873,13 @@ export function installAccountAutomationListener(accountId: AccountId): void {
     void handleAutoreactMessage(accountId, message).catch(() => undefined);
     // The auto welcomer is a primary-account-only feature.
     if (accountId === "primary") void handleWelcomeMessage(message).catch(() => undefined);
+    if (accountId === "primary") {
+      try {
+        recordMention(message, primaryManager().getState().userId);
+      } catch {
+        // Logging a mention must never break other automations.
+      }
+    }
   });
   if (accountId === "primary") {
     // Welcome bots often post the plain line first and edit the embed in after.
