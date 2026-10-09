@@ -63,9 +63,14 @@ router.get("/bot/purge", async (_req, res): Promise<void> => {
 router.post("/bot/purge", async (req, res): Promise<void> => {
   const raw: string = typeof req.body?.guildIds === "string" ? req.body.guildIds : String(req.body?.guildId ?? "");
   const ids = [...new Set(raw.split(/[\s,]+/).filter(Boolean))];
+  const rawTargets: string = typeof req.body?.authorIds === "string" ? req.body.authorIds : String(req.body?.authorId ?? "");
+  const targets = [...new Set(rawTargets.split(/[\s,]+/).map((v) => v.replace(/^<@!?(\d+)>$/, "$1")).filter(Boolean))];
   try {
     if (!ids.length) throw new Error("Server ID is required");
-    for (const id of ids) startMessagePurge(id);
+    for (const id of ids) {
+      if (targets.length) for (const target of targets) startMessagePurge(id, target);
+      else startMessagePurge(id);
+    }
     res.json(getMessagePurgeStatus());
   } catch (error: unknown) {
     res.status(400).json({ error: error instanceof Error ? error.message : "Could not start" });
@@ -74,7 +79,10 @@ router.post("/bot/purge", async (req, res): Promise<void> => {
 
 router.delete("/bot/purge", async (req, res): Promise<void> => {
   if (req.query?.clear === "1") clearFinishedPurges();
-  else stopMessagePurge(typeof req.query?.guildId === "string" ? req.query.guildId : undefined);
+  else {
+    const key = typeof req.query?.key === "string" ? req.query.key : typeof req.query?.guildId === "string" ? req.query.guildId : undefined;
+    stopMessagePurge(key);
+  }
   res.json(getMessagePurgeStatus());
 });
 
