@@ -1,15 +1,20 @@
 import { getBotManager } from "./bot-manager";
 import { logger } from "./logger";
 
-// Deletes every message the primary account ever sent in a server, no matter
-// how old. Uses Discord's server search (finds 2yr+ old messages) and keeps
-// going through disconnects, rate limits and restarts until nothing is left.
+// Deletes every message a user ever sent in a server, no matter how old.
+// Without a target it cleans up the primary account's own messages; with a
+// target user ID it cleans up that person's messages (needs Manage Messages).
+// Uses Discord's server search (finds 2yr+ old messages) and keeps going
+// through disconnects, rate limits and restarts until nothing is left.
 
 type PurgeState = "idle" | "running" | "waiting" | "done" | "stopped" | "error";
 
 type PurgeJob = {
+  key: string;
   guildId: string;
   guildName: string;
+  authorId: string | null;
+  authorName: string;
   state: PurgeState;
   total: number | null;
   deleted: number;
@@ -32,6 +37,10 @@ let restored = false;
 
 const TABLE_SQL = "CREATE TABLE IF NOT EXISTS message_purge_jobs (guild_id TEXT PRIMARY KEY, data JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())";
 
+function jobKey(guildId: string, authorId: string | null): string {
+  return authorId ? guildId + ":" + authorId : guildId;
+}
+
 async function pool(): Promise<any | null> {
   if (!process.env.DATABASE_URL) return null;
   try {
@@ -49,7 +58,7 @@ async function save(job: PurgeJob): Promise<void> {
   if (!db) return;
   await db.query(
     "INSERT INTO message_purge_jobs (guild_id, data, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (guild_id) DO UPDATE SET data = $2, updated_at = NOW()",
-    [job.guildId, JSON.stringify(job)],
+    [job.key, JSON.stringify(job)],
   ).catch(() => undefined);
 }
 
@@ -61,14 +70,14 @@ function saveSoon(job: PurgeJob): void {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function isActive(guildId: string, runId: number): boolean {
-  return runIds.get(guildId) === runId;
+function isActive(key: string, runId: number): boolean {
+  return runIds.get(key) === runId;
 }
 
 // Waits until the primary account is online again (auto reconnect).
 async function waitForClient(job: PurgeJob, runId: number): Promise<{ token: string; userId: string } | null> {
   let reconnectTried = 0;
-  while (isActive(job.guildId, runId)) {
+  while (isActive(job.key, runId)) {
     const manager = getBotManager("primary");
     const client = manager.getClient() as any;
     const userId = manager.getState().userId;
@@ -109,7 +118,7 @@ function logRecent(job: PurgeJob, channelId: string, id: string, result: "delete
 async function deleteOne(job: PurgeJob, runId: number, channelId: string, messageId: string): Promise<void> {
   let attempt = 0;
   let unarchived = false;
-  while (isActive(job.guildId, runId)) {
+  while (isActive(job.key, runId)) {
     const auth = await waitForClient(job, runId);
     if (!auth) return;
     try {
@@ -133,8 +142,8 @@ async function deleteOne(job: PurgeJob, runId: number, channelId: string, messag
           }).catch(() => undefined);
           continue;
         }
-        // System messages / no access: these really can't be deleted.
-        skippedIds.get(job.guildId)?.add(messageId);
+        // System messages / missing Manage Messages: these can't be deleted.
+        skippedIds.get(job.key)?.add(messageId);
         job.skipped += 1;
         logRecent(job, channelId, messageId, "skipped");
         return;
@@ -149,21 +158,22 @@ async function deleteOne(job: PurgeJob, runId: number, channelId: string, messag
 }
 
 async function run(job: PurgeJob, runId: number): Promise<void> {
-  skippedIds.set(job.guildId, skippedIds.get(job.guildId) ?? new Set());
+  skippedIds.set(job.key, skippedIds.get(job.key) ?? new Set());
   job.state = "running";
   job.message = "Searching messages";
   let emptyPasses = 0;
 
-  while (isActive(job.guildId, runId)) {
+  while (isActive(job.key, runId)) {
     const auth = await waitForClient(job, runId);
     if (!auth) return;
-    const skipped = skippedIds.get(job.guildId)!;
+    const targetId = job.authorId ?? auth.userId;
+    const skipped = skippedIds.get(job.key)!;
     let res: Response;
     try {
       res = await discord(
         auth.token,
         "GET",
-        "/guilds/" + job.guildId + "/messages/search?author_id=" + auth.userId
+        "/guilds/" + job.guildId + "/messages/search?author_id=" + targetId
           + "&include_nsfw=true&sort_by=timestamp&sort_order=asc&offset=" + Math.min(skipped.size, 9975),
       );
     } catch {
@@ -192,7 +202,7 @@ async function run(job: PurgeJob, runId: number): Promise<void> {
     const body = await res.json() as { total_results?: number; messages?: any[][] };
     const found = (body.messages ?? [])
       .map((group) => group.find((m) => m.hit) ?? group[0])
-      .filter((m) => m?.id && m.author?.id === auth.userId && !skipped.has(m.id));
+      .filter((m) => m?.id && m.author?.id === targetId && !skipped.has(m.id));
     job.total = job.deleted + Math.max(0, (body.total_results ?? 0) - skipped.size);
 
     if (!found.length) {
@@ -215,7 +225,7 @@ async function run(job: PurgeJob, runId: number): Promise<void> {
     // Spread deletes across a few workers so multiple channels run at once.
     const queue = [...found];
     await Promise.all(Array.from({ length: DELETE_WORKERS }, async () => {
-      while (queue.length && isActive(job.guildId, runId)) {
+      while (queue.length && isActive(job.key, runId)) {
         const m = queue.shift()!;
         await deleteOne(job, runId, m.channel_id, m.id);
       }
@@ -225,35 +235,57 @@ async function run(job: PurgeJob, runId: number): Promise<void> {
 }
 
 function start(job: PurgeJob): void {
-  const runId = (runIds.get(job.guildId) ?? 0) + 1;
-  runIds.set(job.guildId, runId);
-  jobs.set(job.guildId, job);
+  const runId = (runIds.get(job.key) ?? 0) + 1;
+  runIds.set(job.key, runId);
+  jobs.set(job.key, job);
   void save(job);
   void run(job, runId).catch((err) => {
     logger.error({ err }, "Message purge crashed, restarting");
     job.message = "Crashed, restarting";
-    setTimeout(() => { if (isActive(job.guildId, runId)) start(job); }, 5000);
+    setTimeout(() => { if (isActive(job.key, runId)) start(job); }, 5000);
   });
 }
 
-export function startMessagePurge(guildId: string): PurgeJob {
+export function startMessagePurge(guildId: string, authorId?: string | null): PurgeJob {
   const id = guildId.trim();
   if (!/^\d{5,25}$/.test(id)) throw new Error("Invalid server ID");
+  const target = (authorId ?? "").trim() || null;
+  if (target && !/^\d{5,25}$/.test(target)) throw new Error("Invalid user ID");
   const client = getBotManager("primary").getClient() as any;
   if (!client?.token) throw new Error("Primary account is not connected");
   const guildName = client.guilds?.cache?.get?.(id)?.name ?? id;
-  const existing = jobs.get(id);
+  const authorName = target
+    ? (client.users?.cache?.get?.(target)?.username ?? target)
+    : "my messages";
+  const key = jobKey(id, target);
+  const existing = jobs.get(key);
   const job: PurgeJob = existing && existing.state !== "done"
     ? { ...existing, state: "running", finishedAt: null, message: "Resuming" }
-    : { guildId: id, guildName, state: "running", total: null, deleted: 0, skipped: 0, failed: 0, startedAt: new Date().toISOString(), lastDeletedAt: null, finishedAt: null, message: "Starting" };
+    : {
+      key,
+      guildId: id,
+      guildName,
+      authorId: target,
+      authorName,
+      state: "running",
+      total: null,
+      deleted: 0,
+      skipped: 0,
+      failed: 0,
+      startedAt: new Date().toISOString(),
+      lastDeletedAt: null,
+      finishedAt: null,
+      message: "Starting",
+    };
   start(job);
   return job;
 }
 
-export function stopMessagePurge(guildId?: string): void {
+export function stopMessagePurge(key?: string): void {
   for (const job of jobs.values()) {
-    if (guildId && job.guildId !== guildId) continue;
-    runIds.set(job.guildId, (runIds.get(job.guildId) ?? 0) + 1);
+    // Accept either the job key or a bare server ID (stops every target there).
+    if (key && job.key !== key && job.guildId !== key) continue;
+    runIds.set(job.key, (runIds.get(job.key) ?? 0) + 1);
     if (job.state === "running" || job.state === "waiting") {
       job.state = "stopped";
       job.message = "Stopped";
@@ -286,7 +318,11 @@ export async function restoreMessagePurges(): Promise<void> {
   const result = await db.query("SELECT data FROM message_purge_jobs").catch(() => ({ rows: [] }));
   for (const row of result.rows as { data: PurgeJob }[]) {
     const job = row.data;
-    jobs.set(job.guildId, job);
+    // Rows saved before targeted purges existed only have a guild ID.
+    job.authorId = job.authorId ?? null;
+    job.authorName = job.authorName ?? "my messages";
+    job.key = job.key ?? jobKey(job.guildId, job.authorId);
+    jobs.set(job.key, job);
     if (job.state === "running" || job.state === "waiting") {
       job.message = "Resuming after restart";
       start(job);
