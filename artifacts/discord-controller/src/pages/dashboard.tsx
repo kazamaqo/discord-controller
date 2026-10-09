@@ -86,8 +86,11 @@ type AutoreactTarget = {
 };
 
 type PurgeJob = {
+  key: string;
   guildId: string;
   guildName: string;
+  authorId?: string | null;
+  authorName?: string;
   state: "idle" | "running" | "waiting" | "done" | "stopped" | "error";
   total: number | null;
   deleted: number;
@@ -391,6 +394,7 @@ export default function Dashboard() {
   const [autoreactStatus, setAutoreactStatus] = useState<AutoreactStatus | null>(null);
   const [autoreactPending, setAutoreactPending] = useState(false);
   const [purgeGuildIds, setPurgeGuildIds] = useState("");
+  const [purgeAuthorIds, setPurgeAuthorIds] = useState("");
   const [purgeStatus, setPurgeStatus] = useState<PurgeStatus | null>(null);
   const [purgePending, setPurgePending] = useState(false);
 
@@ -556,9 +560,14 @@ export default function Dashboard() {
 
   const handleStartPurge = async () => {
     if (!purgeGuildIds.trim()) return;
-    if (!window.confirm("Delete ALL your messages in these servers? This can't be undone.")) return;
-    if (await purgeRequest("POST", "", { guildIds: purgeGuildIds })) {
+    const targeted = purgeAuthorIds.trim();
+    const question = targeted
+      ? "Delete ALL messages from these users in these servers? This can't be undone."
+      : "Delete ALL your messages in these servers? This can't be undone.";
+    if (!window.confirm(question)) return;
+    if (await purgeRequest("POST", "", { guildIds: purgeGuildIds, authorIds: targeted })) {
       setPurgeGuildIds("");
+      setPurgeAuthorIds("");
       toast({ title: "Auto delete started" });
     }
   };
@@ -1259,7 +1268,7 @@ export default function Dashboard() {
           <CardHeader className="pb-4">
             <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
               <Trash2 className="w-4 h-4" />
-              Auto Delete My Messages
+              Auto Delete Messages
               {purgeStatus?.active && <Badge variant="outline" className="ml-auto text-foreground border-border">RUNNING</Badge>}
             </CardTitle>
           </CardHeader>
@@ -1268,6 +1277,10 @@ export default function Dashboard() {
               <div className="flex-1 space-y-2">
                 <Label className="text-[10px] uppercase text-muted-foreground">Server IDs (primary account)</Label>
                 <Input value={purgeGuildIds} onChange={e => setPurgeGuildIds(e.target.value)} placeholder="123456789012345678, ..." className="font-mono text-sm" />
+              </div>
+              <div className="flex-1 space-y-2">
+                <Label className="text-[10px] uppercase text-muted-foreground">User IDs (blank = my own messages)</Label>
+                <Input value={purgeAuthorIds} onChange={e => setPurgeAuthorIds(e.target.value)} placeholder="target user ID, ..." className="font-mono text-sm" />
               </div>
               <div className="flex gap-2 sm:items-end">
                 <Button onClick={() => void handleStartPurge()} disabled={purgePending || !purgeGuildIds.trim()} className="flex-1 uppercase text-xs tracking-wider">Start</Button>
@@ -1280,18 +1293,18 @@ export default function Dashboard() {
                   const pct = job.total ? Math.min(100, Math.round((job.deleted / job.total) * 100)) : 0;
                   const live = job.state === "running" || job.state === "waiting";
                   return (
-                    <div key={job.guildId} className="rounded-md border border-border p-3 space-y-2">
+                    <div key={job.key ?? job.guildId} className="rounded-md border border-border p-3 space-y-2">
                       <div className="flex items-center gap-2 text-sm">
-                        <span className="font-medium truncate">{job.guildName}</span>
+                        <span className="font-medium truncate">{job.guildName}{job.authorId ? " · " + (job.authorName || job.authorId) : " · my messages"}</span>
                         <Badge variant="outline" className="text-[10px] uppercase">{job.state}</Badge>
                         <span className="ml-auto font-mono text-xs text-muted-foreground">{job.deleted}{job.total !== null ? " / " + job.total : ""}</span>
                         {live
-                          ? <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("DELETE", "?guildId=" + job.guildId)}>Stop</Button>
-                          : job.state !== "done" && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("POST", "", { guildIds: job.guildId })}>Resume</Button>}
+                          ? <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("DELETE", "?key=" + encodeURIComponent(job.key ?? job.guildId))}>Stop</Button>
+                          : job.state !== "done" && <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" disabled={purgePending} onClick={() => void purgeRequest("POST", "", { guildIds: job.guildId, authorIds: job.authorId ?? "" })}>Resume</Button>}
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden"><div className="h-full bg-primary transition-all" style={{ width: pct + "%" }} /></div>
                       <p className="text-xs text-muted-foreground">{job.message}{job.skipped ? " · " + job.skipped + " can't be deleted" : ""}{job.failed ? " · " + job.failed + " retried" : ""}{live && job.perMinute ? " · " + job.perMinute + "/min" : ""}</p>
-                      <p className="text-[10px] text-muted-foreground">Runs on the server — keeps going after you close this tab.</p>
+                      <p className="text-[10px] text-muted-foreground">{job.authorId ? "Needs Manage Messages in that server. " : ""}Runs on the server — keeps going after you close this tab.</p>
                       {job.recent?.length ? (
                         <div className="max-h-32 overflow-y-auto rounded bg-muted/40 p-2 font-mono text-[10px] space-y-0.5">
                           {job.recent.map(r => (
