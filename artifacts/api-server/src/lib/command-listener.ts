@@ -62,6 +62,12 @@ let autoreactRunId = 0;
 
 const AUTOREACT_MAX_RETRIES = 2;
 const AUTOREACT_TARGET_LIMIT = 100;
+// Each account sends this many reactions at once. Higher finishes a burst of
+// targets faster; Discord starts rate limiting above this.
+const AUTOREACT_SLOTS_PER_ACCOUNT = 3;
+// Messages the autoreact already handled. The primary-reaction mirror skips
+// these so it can never add a plain reaction next to a super reaction.
+const autoreactHandledMessageIds = new Set<string>();
 
 function createAutoreactStats(): AutoreactStats {
   return {
@@ -273,7 +279,12 @@ function queueAutoreact(
   runId: number,
   configSuperReaction: boolean,
 ): void {
-  const previous = autoreactQueues.get(accountId) ?? Promise.resolve();
+  // Spread each account's work over a few lanes so one slow reaction does not
+  // hold up the rest. Order inside a lane is preserved.
+  let hash = 0;
+  for (let i = 0; i < messageId.length; i += 1) hash = (hash * 31 + messageId.charCodeAt(i)) % 100000;
+  const lane = (accountId + ":" + (hash % AUTOREACT_SLOTS_PER_ACCOUNT)) as AccountId;
+  const previous = autoreactQueues.get(lane) ?? Promise.resolve();
   let next: Promise<void>;
   next = previous
     .catch(() => undefined)
@@ -289,9 +300,9 @@ function queueAutoreact(
     })
     .finally(() => {
       pendingAutoreactKeys.delete(key);
-      if (autoreactQueues.get(accountId) === next) autoreactQueues.delete(accountId);
+      if (autoreactQueues.get(lane) === next) autoreactQueues.delete(lane);
     });
-  autoreactQueues.set(accountId, next);
+  autoreactQueues.set(lane, next);
 }
 
 async function handleAutoreactMessage(_observerAccountId: AccountId, message: any): Promise<void> {
@@ -315,17 +326,13 @@ async function handleAutoreactMessage(_observerAccountId: AccountId, message: an
 
     const accountIds = resolveAccountIds(config);
     if (!accountIds.length) continue;
+    boundedSetAdd(autoreactHandledMessageIds, messageId, 5000);
     autoreactStats.matched += 1;
     autoreactStats.lastMatchedAt = new Date().toISOString();
 
-    // Account 5 (the Nitro account) leads with the super reaction; other
-    // accounts only super react if they have Nitro, otherwise they skip.
-    const leadAccountId = ACCOUNT_IDS[4];
-    const orderedAccountIds = config.superReaction && leadAccountId && accountIds.includes(leadAccountId)
-      ? [leadAccountId, ...accountIds.filter((id) => id !== leadAccountId)]
-      : accountIds;
-
-    for (const accountId of orderedAccountIds) {
+    // Every account fires at the same time. In super mode the accounts without
+    // Nitro drop out inside reactWithRetry, so no plain reaction is ever sent.
+    for (const accountId of accountIds) {
       const key = runId + ":" + accountId + ":" + messageId + ":" + config.emojiId + ":" + Number(config.superReaction);
       if (autoreactedMessageKeys.has(key) || pendingAutoreactKeys.has(key)) continue;
       pendingAutoreactKeys.add(key);
@@ -408,6 +415,13 @@ export function startAutoreact(options: { targetUserId: string; targetLabel?: st
     ? "all"
     : Number(options.accountCount);
   const superReaction = options.superReaction === true;
+  if (superReaction) {
+    // Look up who has Nitro now, so the first message is not slowed down by it.
+    for (const accountId of connectedAccountIds()) {
+      const client = getBotManager(accountId).getClient() as any;
+      if (client?.token) void accountHasNitro(accountId, client).catch(() => false);
+    }
+  }
 
   if (!/^\d{5,25}$/.test(targetUserId) || (channelId && !/^\d{5,25}$/.test(channelId)) || !validEmojiId(emojiId)) {
     throw new Error("Invalid user, channel, or emoji");
@@ -841,6 +855,11 @@ async function mirrorPrimaryReaction(reaction: any, user: any): Promise<void> {
   const guildId = message?.guild?.id ?? message?.channel?.guild?.id;
   const emoji = reaction?.emoji?.id ?? reaction?.emoji?.name;
   if (!primaryUserId || user?.id !== primaryUserId || !guildId || !channelId || !messageId || !emoji) return;
+  // A super reaction must stay a super reaction. Mirroring it would make the
+  // other accounts add a plain reaction, which is the duplicate bubble.
+  const isBurst = Boolean(reaction?.burst ?? reaction?.me_burst ?? reaction?.countDetails?.burst ?? reaction?.count_details?.burst);
+  if (isBurst) return;
+  if (autoreactHandledMessageIds.has(messageId)) return;
 
   const key = messageId + ":" + String(emoji);
   if (mirroredReactionKeys.has(key)) return;
@@ -851,10 +870,10 @@ async function mirrorPrimaryReaction(reaction: any, user: any): Promise<void> {
   }
   setTimeout(() => mirroredReactionKeys.delete(key), 30000);
 
-  for (const accountId of connectedAccountIds()) {
-    if (accountId === "primary") continue;
+  await Promise.all(connectedAccountIds().map(async (accountId) => {
+    if (accountId === "primary") return;
     const client = getBotManager(accountId).getClient() as any;
-    if (!client) continue;
+    if (!client) return;
     try {
       const channel = await client.channels.fetch(channelId);
       const targetMessage = await channel?.messages?.fetch(messageId);
@@ -862,7 +881,7 @@ async function mirrorPrimaryReaction(reaction: any, user: any): Promise<void> {
     } catch {
       // One unavailable account must not prevent the other accounts from mirroring.
     }
-  }
+  }));
 }
 
 export function installAccountAutomationListener(accountId: AccountId): void {
