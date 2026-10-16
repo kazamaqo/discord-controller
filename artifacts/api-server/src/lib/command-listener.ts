@@ -260,7 +260,7 @@ async function reactWithRetry(
       boundedSetAdd(autoreactedMessageKeys, key, 5000);
       autoreactStats.reacted += 1;
       autoreactStats.lastReactedAt = new Date().toISOString();
-      autoreactStats.lastError = null;
+      autoreactAccountResults.set(accountId, { ok: true, at: new Date().toISOString(), error: null });
       return;
     } catch (error: unknown) {
       lastError = error;
@@ -278,7 +278,11 @@ async function reactWithRetry(
 
   autoreactStats.failed += 1;
   autoreactStats.lastError = accountLabel(accountId) + ": " + reactionErrorMessage(lastError);
+  autoreactAccountResults.set(accountId, { ok: false, at: new Date().toISOString(), error: reactionErrorMessage(lastError) });
+  console.warn("[autoreact] " + autoreactStats.lastError);
 }
+
+const autoreactAccountResults = new Map<string, { ok: boolean; at: string; error: string | null }>();
 
 function queueAutoreact(
   accountId: AccountId,
@@ -420,6 +424,17 @@ export function getAutoreactStatus() {
     channelId: first?.channelId ?? null,
     accountIds: first?.accountIds ?? ([] as AccountId[]),
     stats: { ...autoreactStats },
+    accounts: ACCOUNT_IDS.map((accountId) => {
+      const r = autoreactAccountResults.get(accountId);
+      return {
+        accountId,
+        label: accountLabel(accountId),
+        included: connectedAccountIds().includes(accountId),
+        ok: r ? r.ok : null,
+        error: r?.error ?? null,
+        at: r?.at ?? null,
+      };
+    }),
   };
 }
 
@@ -482,6 +497,7 @@ export function stopAutoreact(idOrUserId?: string): void {
     autoreactTargetsByUser.clear();
     autoreactRunId += 1;
     autoreactStats = createAutoreactStats();
+    autoreactAccountResults.clear();
     autoreactedMessageKeys.clear();
     pendingAutoreactKeys.clear();
     return;
