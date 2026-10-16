@@ -11,6 +11,7 @@ const HELP_MESSAGE = [
   ANSI + "1;36m- xhelp [or xsetup]" + ANSI + "0m",
   ANSI + "1;32m- xstatus [online|idle|dnd|invisible|streaming]" + ANSI + "0m",
   ANSI + "1;33m- xactivity <type> <name> [artist] [album] [image-url] [twitch-id]" + ANSI + "0m",
+  ANSI + "1;35m- xar join <channel-id> <account-count> (in this server)" + ANSI + "0m",
   ANSI + "1;35m- xjoin vc <guild-id> <channel-id> (all connected accounts)" + ANSI + "0m",
   ANSI + "1;31m- xplay <youtube-url> (all connected accounts)" + ANSI + "0m",
   ANSI + "1;32m- xpause (all connected accounts)" + ANSI + "0m",
@@ -599,29 +600,52 @@ async function handleCommand(message: any): Promise<void> {
     await replyAndDelete(message, "Activity updated: " + (updated.length ? updated.join(", ") : "none") + (failed.length ? NL + "Failed: " + failed.join(", ") : ""));
     return;
   }
-  if (command === "join" && args.shift()?.toLowerCase() === "vc") {
-    const guildId = args.shift();
-    const channelId = args.shift();
-    if (!guildId || !channelId) {
-      await replyAndDelete(message, "Usage: xjoin vc <guild-id> <channel-id>");
+  const isShortVoiceJoin = ["ar", "autoreact", "react"].includes(command) && args[0]?.toLowerCase() === "join";
+  const isLegacyVoiceJoin = command === "join" && args[0]?.toLowerCase() === "vc";
+  if (isShortVoiceJoin || isLegacyVoiceJoin) {
+    // Remove the controller's own command before any slow Discord calls.
+    await deleteControllerMessage(message);
+    const guildId = isShortVoiceJoin
+      ? message.guild?.id ?? message.guildId ?? message.channel?.guild?.id
+      : args[1];
+    const channelArg = isShortVoiceJoin ? args[1] : args[2];
+    const channelId = channelArg?.match(/^<#(\d+)>$/)?.[1] ?? channelArg;
+    const countArg = isShortVoiceJoin ? args[2] : undefined;
+    const available = ACCOUNT_IDS.filter((accountId) => {
+      const account = getBotManager(accountId);
+      return account.getState().connected && Boolean(account.getClient());
+    });
+    if (isShortVoiceJoin && !guildId) {
+      await send(message, "Use xar join inside the server containing the voice channel.");
       return;
     }
-    const joined: string[] = [];
+    if (!guildId || !channelId || !/^\d{5,25}$/.test(channelId)
+      || (isShortVoiceJoin && (args.length !== 3 || !/^[1-9]\d*$/.test(countArg ?? "")))) {
+      await send(message, isShortVoiceJoin
+        ? "Usage: xar join <vc-id> <account-count>"
+        : "Usage: xjoin vc <guild-id> <channel-id>");
+      return;
+    }
+    const count = isShortVoiceJoin ? Number(countArg) : available.length;
+    if (!available.length || !Number.isSafeInteger(count) || count > available.length) {
+      await send(message, "Only " + available.length + " connected accounts are available; choose a count from 1 to " + available.length + ".");
+      return;
+    }
     const failed: string[] = [];
-    for (const accountId of connectedAccountIds()) {
+    for (const accountId of available.slice(0, count)) {
       const client = getBotManager(accountId).getClient();
       if (!client) {
         failed.push(accountLabel(accountId) + " (client unavailable)");
         continue;
       }
       try {
-        const state = await getMusicManager(accountId).join(client, guildId, channelId);
-        joined.push(accountLabel(accountId) + " (" + (state.channelName ?? channelId) + ")");
+        await getMusicManager(accountId).join(client, guildId, channelId);
       } catch (error: unknown) {
         failed.push(accountLabel(accountId) + " (" + (error instanceof Error ? error.message : "join failed") + ")");
       }
     }
-    await replyAndDelete(message, "Joined: " + (joined.length ? joined.join(", ") : "none") + (failed.length ? NL + "Failed: " + failed.join(", ") : ""));
+    // Successful joins are silent; only actionable failures are reported.
+    if (failed.length) await send(message, "Failed: " + failed.join(", "));
     return;
   }
   if (command === "play") {

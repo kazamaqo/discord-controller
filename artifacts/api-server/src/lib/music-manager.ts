@@ -71,7 +71,7 @@ export class MusicManager {
     let channel = guild.channels.cache.get(channelId);
     if (!channel) {
       const fetched = await guild.channels.fetch(channelId).catch(() => null);
-      if (fetched) channel = fetched as typeof channel;
+      if (fetched) channel = fetched;
     }
     if (!channel) throw new Error("Channel not found");
 
