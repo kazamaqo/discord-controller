@@ -1386,6 +1386,15 @@ export default function Dashboard() {
                     {autoreactStatus.stats.lastError ? " · Last error: " + autoreactStatus.stats.lastError : ""}
                   </div>
                 )}
+                {Array.isArray((autoreactStatus as any).accounts) && (
+                  <div className="mt-2 grid gap-1 text-xs">
+                    {(autoreactStatus as any).accounts.map((a: any) => (
+                      <div key={a.accountId}>
+                        {a.label}: {!a.included ? "not connected (skipped)" : a.ok === null ? "waiting" : a.ok ? "reacting OK" : "failed — " + a.error}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </CardContent>
