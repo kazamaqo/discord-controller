@@ -216,7 +216,10 @@ async function reactWithRetry(
         // Super reactions are Nitro-only. Accounts without Nitro skip entirely
         // instead of falling back to a normal reaction (that created a second,
         // duplicate reaction bubble next to the super one).
-        if (!(await accountHasNitro(accountId, client))) return;
+        if (!(await accountHasNitro(accountId, client))) {
+          autoreactStats.lastError = accountLabel(accountId) + ": skipped (no Nitro, super reactions need Nitro)";
+          return;
+        }
         const token = client.token;
         if (!token) return;
         const encoded = encodeURIComponent(emojiId.replace(/^<a?:/, "").replace(/>$/, ""));
@@ -225,7 +228,16 @@ async function reactWithRetry(
             + "/reactions/" + encoded + "/@me?location=Message&type=1",
           { method: "PUT", headers: { Authorization: token, "Content-Type": "application/json" } },
         );
-        if (!res.ok) return; // never fall back to a normal reaction
+        if (!res.ok) {
+          // Never fall back to a normal reaction, but do retry and report.
+          const error = new Error("Discord super reaction failed (" + res.status + ")") as Error & { status?: number; retryAfter?: number };
+          error.status = res.status;
+          if (res.status === 429) {
+            const body = await res.json().catch(() => null) as { retry_after?: number } | null;
+            error.retryAfter = body?.retry_after ? body.retry_after * 1000 : undefined;
+          }
+          throw error;
+        }
       } else {
         // Use Discord's reaction endpoint directly. This avoids a channel lookup
         // and lets every connected account send its reaction at the same time.
@@ -369,7 +381,14 @@ function accountLabel(accountId: AccountId): string {
 }
 
 export function connectedAccountIds(): AccountId[] {
-  return ACCOUNT_IDS.filter((accountId) => getBotManager(accountId).getState().connected);
+  // Include accounts that are briefly reconnecting but still have a live
+  // session token, so one flaky account doesn't silently drop out.
+  return ACCOUNT_IDS.filter((accountId) => {
+    const manager = getBotManager(accountId);
+    if (manager.getState().connected) return true;
+    const client = manager.getClient() as any;
+    return Boolean(client?.token && client?.user?.id);
+  });
 }
 
 // Accounts are resolved live, so an account that comes online after the
